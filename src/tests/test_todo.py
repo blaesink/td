@@ -51,3 +51,12 @@ def test_simulate_add_todo():
     cmd = f"rm {actual.val}"
     assert isinstance(m.eval(cmd), Delete)
     assert len(m.items) == 0
+
+def test_add_duplicate_todo():
+    t = Todo.from_line("Take out trash")
+    m = Manager()
+
+    m.add_todo(t)
+
+    with pytest.raises(KeyError):
+        m.add_todo(Todo.from_line("Take out trash"))

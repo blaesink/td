@@ -62,7 +62,7 @@ class Manager:
     @staticmethod
     def generate_hash(todo: Todo) -> str:
         """Generate a letter hash from the input"""
-        hsh = todo.__hash__()
+        hsh = todo.description.__hash__()
         result = ""
         step = 1
 
