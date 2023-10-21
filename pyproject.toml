@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "td"
+version = "0.1.0"
+description = "A simple todo cli app"
+authors = ["Kevin Blaesing"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.2"
+# pytest-watch = "^4.2.0"
+pytest-mock = "^3.12.0"
+pytest-watcher = "^0.3.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest-watcher]
+now = true
+delay = 0.2
+runner = "pytest"
+runner_args = []
+patterns = ["*.py"]
+ignore_patterns = []
