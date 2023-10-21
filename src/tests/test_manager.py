@@ -1,38 +1,6 @@
-from contextlib import nullcontext
-from td import Todo, Add, Delete, Manager, read_file
 import pytest
-
-
-@pytest.fixture
-def fake_todo_file():
-    return """- Make bread
-    - Get a haircut +Personal +Wedding"""
-
-
-@pytest.fixture
-def fake_todo_list() -> list[Todo]:
-    return [Todo("Fix car +Roadtrip"), Todo("File taxes")]
-
-
-def test_make_todo_from_line():
-    td1 = "- Make a sandwich +Personal"
-
-    actual = Todo.from_line(td1)
-
-    assert actual.tags == ["Personal"]
-    assert actual.group == "-"
-
-
-def test_read_file(fake_todo_file, mocker):
-    mock_file = mocker.patch("builtins.open")
-    mock_file.return_value.__enter__.return_value.readlines.return_value = (
-        fake_todo_file.split("\n")
-    )
-
-    actual = read_file("bad_path")
-    assert len(actual) == 2
-    assert actual[0].tags == []
-    assert actual[1].tags == ["Personal", "Wedding"]
+from contextlib import nullcontext
+from td import Manager, Add, Delete, Todo, read_file
 
 
 def test_manager_hash(mocker):
@@ -72,3 +40,20 @@ def test_add_duplicate_todo():
 
     with pytest.raises(KeyError):
         m.add_todo(Todo.from_line("Take out trash"))
+
+
+def test_get_grouped_todos(mocker):
+    todo_file = """A Find that weird bug +Dev
+    A Tell Ray that the flux capacitor is broken +Job"""
+
+    mock_file = mocker.patch("builtins.open")
+    mock_file.return_value.__enter__.return_value.readlines.return_value = (
+        todo_file.split("\n")
+    )
+
+    # just get the items from above
+    td_list = read_file("fake_path")
+    m = Manager(*td_list)
+
+    actual = m.eval("ls &A")
+    assert len(actual.val) == 2

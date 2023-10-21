@@ -3,6 +3,7 @@ from collections import OrderedDict
 
 ALPHA = "abcdefghijklmnopqrstuvwxyz"
 
+
 class Todo:
     """A Todo holds:
 
@@ -10,6 +11,7 @@ class Todo:
     - `tags` to organize it.
     - An optional `group` (single charater) to organize it with disparate tags (like a large project).
     """
+
     def __init__(self, description: str, *tags: str, group: Optional[str] = None):
         self.description = description
         self.tags = list(tags)
@@ -19,8 +21,8 @@ class Todo:
     def from_line(cls, line: str, /) -> Self:
         group = line[0]
 
-        if (tags_start := line.find('+')) >= 0:
-            description = line[2:tags_start-1]
+        if (tags_start := line.find("+")) >= 0:
+            description = line[2 : tags_start - 1]
             tags = line[tags_start:].split("+")[1:]
 
             # Clean whitespace
@@ -31,12 +33,19 @@ class Todo:
             description = line[2:]
             tags = []
 
-
         return Todo(description, *tags, group=group)
+
+    def _format_tags(self) -> str:
+        return " ".join([f"+{tag}" for tag in self.tags])
+
+    def __repr__(self) -> str:
+        return f"{self.group} {self.description} {self._format_tags}"
+
 
 def read_file(fp: str, /) -> list[Todo]:
     with open(fp, "r") as f:
         return list(map(Todo.from_line, f.readlines()))
+
 
 class Add:
     __slots__ = ("val",)
@@ -44,23 +53,34 @@ class Add:
     def __init__(self, val: str, /):
         self.val = val
 
+
 class Delete:
     __slots__ = ("val",)
 
     def __init__(self, val: Todo, /):
         self.val = val
-   
-Operation = Add | Delete
+
+
+class QueryResponse:
+    __slots__ = ("val",)
+
+    def __init__(self, val: Todo, /):
+        self.val = val
+
+
+Operation = Add | Delete | QueryResponse
+
 
 class Manager:
+    """The Manager class holds all Todo items."""
+
     def __init__(self, *todos: Todo):
         self.items: OrderedDict[str, Todo] = OrderedDict()
         for todo in todos:
             self.add_todo(todo)
 
-
     @staticmethod
-    def generate_hash(todo: Todo) -> str:
+    def generate_hash(todo: Todo, /) -> str:
         """Generate a letter hash from the input"""
         hsh = todo.description.__hash__()
         result = ""
@@ -73,7 +93,7 @@ class Manager:
 
         return result
 
-    def add_todo(self, todo: Todo) -> str:
+    def add_todo(self, todo: Todo, /) -> str:
         hsh = self.generate_hash(todo)
 
         if self.items.get(hsh):
@@ -81,12 +101,16 @@ class Manager:
         self.items[hsh] = todo
         return hsh
 
-    def remove_todo(self, hsh: str) -> Optional[Todo]:
+    def remove_todo(self, hsh: str, /) -> Optional[Todo]:
         if not self.items.get(hsh):
             return None
         return self.items.pop(hsh)
-        
+
+    def _query(self, input: str) -> Optional[list[Todo]]:
+        ...
+
     def eval(self, input: str, /) -> Operation:
+        """Evaluate string input and operate on the command recieved."""
         cmd, rest = input.split(" ", 1)
 
         match cmd:
@@ -97,7 +121,9 @@ class Manager:
                 if not maybe_todo:
                     raise ValueError(f"{rest} does not exist")
                 res = Delete(maybe_todo)
+            case "ls":
+                res = QueryResponse(self._query(rest))
             case _:
                 raise ValueError(cmd)
-            
+
         return res
