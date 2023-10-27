@@ -39,7 +39,7 @@ class Todo:
         return " ".join([f"+{tag}" for tag in self.tags])
 
     def __repr__(self) -> str:
-        return f"{self.group} {self.description} {self._format_tags}"
+        return f"{self.group} {self.description} {self._format_tags()}"
 
 
 def read_file(fp: str, /) -> list[Todo]:
@@ -79,10 +79,14 @@ class Manager:
         for todo in todos:
             self.add_todo(todo)
 
+    @property
+    def todos(self):
+        return self.items.values()
+
     @staticmethod
     def generate_hash(todo: Todo, /) -> str:
         """Generate a letter hash from the input"""
-        hsh = todo.description.__hash__()
+        hsh = hash(todo.description)
         result = ""
         step = 1
 
@@ -106,8 +110,26 @@ class Manager:
             return None
         return self.items.pop(hsh)
 
-    def _query(self, input: str) -> Optional[list[Todo]]:
-        ...
+    def _query(self, input: str) -> list[Todo]:
+        """Perform a query on the collection"""
+        result = []
+        groups = []
+        tags = []
+
+        for token in input.split(" "):
+            if token.startswith("+"):
+                tags.append(token[1:])
+            elif token.startswith("&"):
+                # Ignore after the &
+                tags.append(token[1:])
+
+        # Skim through and grab all items that match GROUPS
+        for group in groups:
+            matches = filter(lambda todo: todo.group == group, self.todos)
+            result += list(matches)
+
+        print(result)
+        return result
 
     def eval(self, input: str, /) -> Operation:
         """Evaluate string input and operate on the command recieved."""

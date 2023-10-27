@@ -12,10 +12,16 @@ def test_manager_hash(mocker):
     assert actual == "cmbkstlrtdsorepdofji"
 
 
+def test_manager_hash_not_empty():
+    fake_todo = Todo("File taxes")
+
+    assert Manager.generate_hash(fake_todo) != ""
+
+
 def test_manager_from_items(fake_todo_list):
     with nullcontext():  # does not raise
         m = Manager(*fake_todo_list)
-        assert len(m.items) == 2
+    assert len(m.todos) == 2
 
 
 def test_simulate_add_todo():
