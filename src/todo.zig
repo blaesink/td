@@ -6,7 +6,7 @@ const Errors = error{
     EmptyLineError,
 };
 
-const Todo = struct {
+pub const Todo = struct {
     const Self = @This();
 
     description: []const u8,
@@ -17,31 +17,16 @@ const Todo = struct {
         if (line.len == 0) {
             return Errors.EmptyLineError;
         }
-        var items = std.mem.splitAny(u8, line, "+&");
-
-        var description: []const u8 = undefined;
-
-        if (items.next()) |item| {
-            description = item;
-        }
 
         var group: u8 = '-'; // Start with empty group.
+
+        var description_words = std.ArrayList(u8).init(allocator);
+        defer description_words.deinit();
+
         var tags = std.ArrayList([]const u8).init(allocator);
         defer tags.deinit();
 
-        while (items.next()) |item| {
-            switch (item[0]) {
-                '&' => {
-                    group = item[0];
-                },
-                '+' => {
-                    try tags.append(item[1..]);
-                },
-                else => {
-                    continue;
-                },
-            }
-        }
+        var tokens = std.mem.splitScalar(u8, line, ' ');
 
         return .{
             .description = description,
@@ -64,4 +49,16 @@ test "Make a Todo" {
 
 test "Can't init empty line" {
     try std.testing.expectError(Errors.EmptyLineError, Todo.from_line("", t.allocator));
+}
+
+test "Make a todo with a tag" {
+    const td = try Todo.from_line("Make Bread +Party", t.allocator);
+
+    try t.expectEqualSlices([]const u8, &[_][]const u8{"Party"}, td.tags);
+}
+
+test "Make a todo with a group" {
+    const td = try Todo.from_line("Make Bread &P", t.allocator);
+
+    try expect(td.group == 'P');
 }
