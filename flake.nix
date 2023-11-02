@@ -37,6 +37,10 @@
           modules = [
             ({pkgs, ...}: {
               packages = [pkgs.zig pkgs.zls];
+
+              # zig build test
+              scripts.zbt.exec = "zig build test";
+              scripts.zbr.exec = "zig build run";
             })
           ];
         };
