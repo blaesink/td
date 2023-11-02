@@ -13,7 +13,7 @@ pub const Todo = struct {
     tags: [][]const u8,
     group: u8,
 
-    pub fn from_line(line: []const u8, allocator: std.mem.Allocator) !Self {
+    pub fn fromLine(line: []const u8, allocator: std.mem.Allocator) !Self {
         if (line.len == 0) {
             return Errors.EmptyLineError;
         }
@@ -37,7 +37,7 @@ pub const Todo = struct {
 };
 
 test "Make a Todo" {
-    const td = try Todo.from_line("Make Bread", t.allocator);
+    const td = try Todo.fromLine("Make Bread", t.allocator);
     try expect(std.mem.eql(u8, td.description, "Make Bread"));
 
     // Default group.
@@ -48,17 +48,17 @@ test "Make a Todo" {
 }
 
 test "Can't init empty line" {
-    try std.testing.expectError(Errors.EmptyLineError, Todo.from_line("", t.allocator));
+    try std.testing.expectError(Errors.EmptyLineError, Todo.fromLine("", t.allocator));
 }
 
 test "Make a todo with a tag" {
-    const td = try Todo.from_line("Make Bread +Party", t.allocator);
+    const td = try Todo.fromLine("Make Bread +Party", t.allocator);
 
     try t.expectEqualSlices([]const u8, &[_][]const u8{"Party"}, td.tags);
 }
 
 test "Make a todo with a group" {
-    const td = try Todo.from_line("Make Bread &P", t.allocator);
+    const td = try Todo.fromLine("Make Bread &P", t.allocator);
 
     try expect(td.group == 'P');
 }
