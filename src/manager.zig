@@ -6,6 +6,16 @@ const lib_todo = @import("todo.zig");
 const Todo = lib_todo.Todo;
 const md5 = std.crypto.hash.Md5;
 
+const TD_HOME_DIR: []const u8 = ".td";
+
+const Commands = enum {
+    add,
+    help,
+    ls,
+    remove,
+    rm,
+};
+
 /// Generates a string hash from the `Todo`'s description.
 /// Returns the generated hash.
 fn generateTodoHash(todo_description: []const u8) ![32]u8 {
@@ -20,9 +30,38 @@ fn generateTodoHash(todo_description: []const u8) ![32]u8 {
 }
 
 /// Removes the todo from the file.
-fn removeTodo(todo_file_path: []const u8, todo_hash: []const u8) !void {
-    _ = todo_hash;
-    _ = todo_file_path;
+/// TODO: This uses an ArrayList to track and remove lines. May be ineffecient.
+fn removeTodoAlloc(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem.Allocator) !void {
+    // Go back to start because we had to scan the file to get the ids earlier.
+    try todo_file.seekTo(0);
+
+    var new_file_lines = std.ArrayList(u8).init(allocator);
+    defer new_file_lines.deinit();
+
+    const file_contents = try todo_file.readToEndAlloc(allocator, 4096);
+    defer allocator.free(file_contents);
+
+    var lines = getFileLines(file_contents);
+
+    // TODO: this is "fuzzy" but there's no guarantee that it won't remove the wrong one.
+    while (lines.next()) |line| {
+        if (!std.mem.containsAtLeast(u8, line, 1, todo_hash)) {
+            // Add this line to be written.
+            try new_file_lines.appendSlice(line);
+        } else {
+            std.log.debug("Found match: {s}", .{line});
+        }
+    }
+
+    std.log.debug("{any}", .{new_file_lines.items});
+
+    try todo_file.seekTo(0);
+
+    const written_bytes = try todo_file.write(new_file_lines.items);
+
+    if (written_bytes == 0) {
+        return error.DidNotWriteContent;
+    }
 }
 
 fn addTodoAlloc(todo_file: fs.File, todo: Todo, allocator: std.mem.Allocator) ![32]u8 {
@@ -109,38 +148,63 @@ fn maybeGenerateConfigFileAlloc(allocator: std.mem.Allocator) !void {
     }
 }
 
-/// Generate the todo file under `$HOME/td/`.
+/// Generates the todo file under `$HOME/.td/`.
 fn generateTodoFile(home_path: []const u8) !void {
     const home_dir = try fs.openDirAbsolute(home_path, .{});
 
-    const td_dir = try home_dir.makeOpenPath("td", .{});
+    const td_dir = try home_dir.makeOpenPath(TD_HOME_DIR, .{});
     _ = try td_dir.createFile("todo.txt", .{});
 }
 
 pub fn evalCommandAlloc(command: []const u8, input: ?[]const u8, allocator: std.mem.Allocator) !void {
+    const stdout = std.io.getStdOut().writer();
+
     const user_home_string = try getHomeDirAbsolute();
     const config_file_string = try fs.path.join(allocator, &[_][]const u8{ user_home_string, ".config", "td", "config.txt" });
     defer allocator.free(config_file_string);
-
-    try std.io.getStdOut().writer().print("{s}\n", .{config_file_string});
 
     fs.accessAbsolute(config_file_string, .{}) catch {
         try maybeGenerateConfigFileAlloc(allocator);
     };
 
-    const todo_file_path = try fs.path.join(allocator, &[_][]const u8{ user_home_string, "td", "todo.txt" });
+    const todo_file_path = try fs.path.join(allocator, &[_][]const u8{ user_home_string, TD_HOME_DIR, "todo.txt" });
     defer allocator.free(todo_file_path);
 
     _ = fs.openFileAbsolute(todo_file_path, .{}) catch try generateTodoFile(user_home_string);
 
     const todo_file = try std.fs.openFileAbsolute(todo_file_path, .{ .mode = .read_write });
 
-    // TODO: make this an enum switch.
-    if (std.mem.eql(u8, command, "add")) {
-        var td = try Todo.fromLine(input.?[0..input.?.len], allocator);
-        defer td.deinit();
-        const id = try addTodoAlloc(todo_file, td, allocator);
-        std.debug.print("{s}\n", .{id});
+    const cmd_to_enum = std.meta.stringToEnum(Commands, command) orelse {
+        try stdout.print("Invalid Command!\n", .{});
+        return;
+    };
+
+    switch (cmd_to_enum) {
+        .add => {
+            var td = try Todo.fromLine(input.?[0..input.?.len], allocator);
+            defer td.deinit();
+            const id = try addTodoAlloc(todo_file, td, allocator);
+            std.debug.print("{s}\n", .{id});
+        },
+        .remove, .rm => {
+            const maybe_todo_hash = try getTodoFromHashAlloc(todo_file, input.?, allocator);
+
+            if (maybe_todo_hash) |hash| {
+                try removeTodoAlloc(todo_file, hash, allocator);
+                return;
+            }
+            return error.NoHashFound;
+        },
+        .ls => {
+            const file_contents = try todo_file.readToEndAlloc(allocator, 4096);
+            defer allocator.free(file_contents);
+
+            try stdout.print("{s}", .{file_contents});
+            return;
+        },
+        .help => {
+            try stdout.print("Help!\n", .{});
+        },
     }
 }
 
@@ -171,6 +235,27 @@ pub const TestingTodo = struct {
         const added_todo_id = try addTodoAlloc(todo_file, td, t.allocator);
 
         try std.testing.expect(added_todo_id.len > 0);
+
+        try Self.remove_test_file();
+    }
+
+    test "Remove todo from test file" {
+        _ = try std.fs.cwd().createFile(testing_todo_file_path, .{});
+
+        const todo_file = try std.fs.cwd().openFile("todo.txt", .{ .mode = .read_write });
+        defer todo_file.close();
+
+        var td = try Todo.fromLine("Hello World!", t.allocator);
+        defer td.deinit();
+
+        const added_todo_id = try addTodoAlloc(todo_file, td, t.allocator);
+        _ = try removeTodoAlloc(todo_file, &added_todo_id, t.allocator);
+
+        const file_contents = try todo_file.readToEndAlloc(t.allocator, 4096);
+        defer t.allocator.free(file_contents);
+
+        // Should be totally empty.
+        try std.testing.expectEqualSlices(u8, "", file_contents);
 
         try Self.remove_test_file();
     }

@@ -5,6 +5,7 @@ const manager = @import("manager.zig");
 const print = std.debug.print;
 
 pub fn main() !void {
+    const stdout = std.io.getStdOut().writer();
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -21,5 +22,22 @@ pub fn main() !void {
     // There must be a command.
     const command = args.next().?;
 
-    try manager.evalCommandAlloc(command, args.next(), allocator);
+    // The rest is optional depending on the command.
+    const todo_input = args.next();
+
+    manager.evalCommandAlloc(command, todo_input, allocator) catch |err| {
+        switch (err) {
+            error.ExistingHashFound => {
+                try stdout.print("There's already a todo that matches this description: \"{s}\"\n", .{todo_input.?});
+                return;
+            },
+            error.NoHashFound => {
+                try stdout.print("Couldn't find a todo with that id!\n", .{});
+                return;
+            },
+            else => {
+                @panic("Unknown error!");
+            },
+        }
+    };
 }
