@@ -72,7 +72,11 @@ fn addTodoAlloc(todo_file: fs.File, todo: Todo, allocator: std.mem.Allocator) ![
     var contents_to_write = std.ArrayList(u8).init(allocator);
     defer contents_to_write.deinit();
 
-    try std.fmt.format(contents_to_write.writer(), "({s}) {s}\n", .{ todo_hash, todo.description.items });
+    if (todo.tags.items.len > 0) {
+        try std.fmt.format(contents_to_write.writer(), "{c} {s} {s} ({s})\n", .{ todo.group, todo.description.items, todo.tags.items, todo_hash });
+    } else {
+        try std.fmt.format(contents_to_write.writer(), "{c} {s} ({s})\n", .{ todo.group, todo.description.items, todo_hash });
+    }
 
     // Write to the file
     _ = try todo_file.write(contents_to_write.items);
