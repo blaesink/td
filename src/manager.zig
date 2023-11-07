@@ -49,17 +49,13 @@ fn removeTodoAlloc(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem
         }
     }
 
+    // Politely go back to the start.
     try todo_file.seekTo(0);
 
     // "Truncate" the file so we can write the new contents.
     try todo_file.setEndPos(0);
 
-    const bytes_written = try todo_file.write(lines_to_write.items);
-
-    // NOTE: May not need this check, but better safe than sorry.
-    if (bytes_written == 0) {
-        return error.NoBytesWritten;
-    }
+    _ = try todo_file.write(lines_to_write.items);
 }
 
 fn addTodoAlloc(todo_file: fs.File, todo: Todo, allocator: std.mem.Allocator) ![32]u8 {
