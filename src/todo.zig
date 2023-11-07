@@ -37,6 +37,10 @@ pub const Todo = struct {
         const first_tag_index = std.mem.indexOfScalar(u8, line, '+') orelse line.len;
         const group_index = std.mem.indexOfScalar(u8, line, '&') orelse line.len;
 
+        // Make sure that regardless of having a tag or not, a group or not, that the description
+        // doesn't contain any of them.
+        var end_of_description_index = @min(line.len, @min(first_tag_index, group_index));
+
         if (group_index != line.len) {
             const maybe_second_group = std.mem.lastIndexOfScalar(u8, line[group_index + 1 ..], '&');
 
@@ -54,7 +58,7 @@ pub const Todo = struct {
             }
         }
 
-        var words = std.mem.tokenizeScalar(u8, line[0..first_tag_index], ' ');
+        var words = std.mem.tokenizeScalar(u8, line[0..end_of_description_index], ' ');
 
         while (words.next()) |word| {
             try description.appendSlice(word);
@@ -90,6 +94,13 @@ test "Can't make an empty Todo" {
 
 test "Can't have multiple groups in a Todo" {
     try t.expectError(Errors.FoundMultipleGroups, Todo.fromLine("&A &B", t.allocator));
+}
+
+test "Single Group Todo" {
+    var td = try Todo.fromLine("Hello World! &A", t.allocator);
+    defer td.deinit();
+
+    try t.expectEqualSlices(u8, "Hello World!", td.description.items);
 }
 
 test "Make a Todo" {
