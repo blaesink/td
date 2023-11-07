@@ -32,35 +32,33 @@ fn generateTodoHash(todo_description: []const u8) ![32]u8 {
 /// Removes the todo from the file.
 /// TODO: This uses an ArrayList to track and remove lines. May be ineffecient.
 fn removeTodoAlloc(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem.Allocator) !void {
-    // Go back to start because we had to scan the file to get the ids earlier.
+
+    // Go to the beginning.
     try todo_file.seekTo(0);
-
-    var new_file_lines = std.ArrayList(u8).init(allocator);
-    defer new_file_lines.deinit();
-
     const file_contents = try todo_file.readToEndAlloc(allocator, 4096);
     defer allocator.free(file_contents);
 
+    var lines_to_write = std.ArrayList(u8).init(allocator);
+    defer lines_to_write.deinit();
+
     var lines = getFileLines(file_contents);
 
-    // TODO: this is "fuzzy" but there's no guarantee that it won't remove the wrong one.
     while (lines.next()) |line| {
         if (!std.mem.containsAtLeast(u8, line, 1, todo_hash)) {
-            // Add this line to be written.
-            try new_file_lines.appendSlice(line);
-        } else {
-            std.log.debug("Found match: {s}", .{line});
+            try lines_to_write.appendSlice(line);
         }
     }
 
-    std.log.debug("{any}", .{new_file_lines.items});
-
     try todo_file.seekTo(0);
 
-    const written_bytes = try todo_file.write(new_file_lines.items);
+    // "Truncate" the file so we can write the new contents.
+    try todo_file.setEndPos(0);
 
-    if (written_bytes == 0) {
-        return error.DidNotWriteContent;
+    const bytes_written = try todo_file.write(lines_to_write.items);
+
+    // NOTE: May not need this check, but better safe than sorry.
+    if (bytes_written == 0) {
+        return error.NoBytesWritten;
     }
 }
 
@@ -163,6 +161,7 @@ pub fn evalCommandAlloc(command: []const u8, input: ?[]const u8, allocator: std.
     const config_file_string = try fs.path.join(allocator, &[_][]const u8{ user_home_string, ".config", "td", "config.txt" });
     defer allocator.free(config_file_string);
 
+    // TODO: this is just to check that we hav =e a config file by the time we want to use it.
     fs.accessAbsolute(config_file_string, .{}) catch {
         try maybeGenerateConfigFileAlloc(allocator);
     };
