@@ -27,17 +27,22 @@ pub fn main() !void {
 
     manager.evalCommandAlloc(command, todo_input, allocator) catch |err| {
         switch (err) {
+            error.EmptyLineError => {
+                try stdout.print("Can't have a todo with an empty line!\n\"{?s}\"\n", .{todo_input});
+            },
             error.ExistingHashFound => {
                 try stdout.print("There's already a todo that matches this description: \"{s}\"\n", .{todo_input.?});
-                return;
             },
             error.NoHashFound => {
                 try stdout.print("Couldn't find a todo with that id!\n", .{});
-                return;
+            },
+            error.UnknownCommand => {
+                try stdout.print("Can't handle supplied command: `{s}`!\n", .{command});
             },
             else => {
                 @panic("Unknown error!");
             },
         }
+        return;
     };
 }
