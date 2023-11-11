@@ -1,8 +1,9 @@
 const std = @import("std");
-const fs = std.fs;
 const builtin = @import("builtin");
-const t = std.testing;
 const lib_todo = @import("todo.zig");
+
+const fs = std.fs;
+const t = std.testing;
 const Todo = lib_todo.Todo;
 const md5 = std.crypto.hash.Md5;
 const ArrayList = std.ArrayList;
@@ -60,7 +61,7 @@ fn removeTodoAlloc(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem
 }
 
 fn addTodoAlloc(todo_file: fs.File, todo: Todo, allocator: std.mem.Allocator) ![32]u8 {
-    const todo_hash = try generateTodoHash(todo.description.items);
+    const todo_hash = try generateTodoHash(todo.description);
 
     // TODO: check that we already have this file generated.
     if (try getTodoFromHashAlloc(todo_file, &todo_hash, allocator) != null) {
@@ -70,24 +71,17 @@ fn addTodoAlloc(todo_file: fs.File, todo: Todo, allocator: std.mem.Allocator) ![
     // Go to the end of the file to start appending to.
     try todo_file.seekTo(try todo_file.getEndPos());
 
-    var contents_to_write = ArrayList(u8).init(allocator);
-    defer contents_to_write.deinit();
-
-    if (todo.tags.items.len > 0) {
-        try std.fmt.format(contents_to_write.writer(), "{c} {s} {s} ({s})\n", .{ todo.group, todo.description.items, todo.tags.items, todo_hash });
-    } else {
-        try std.fmt.format(contents_to_write.writer(), "{c} {s} ({s})\n", .{ todo.group, todo.description.items, todo_hash });
-    }
+    const formatted_todo = try todo.formatToStringAlloc(&todo_hash);
+    defer allocator.free(formatted_todo);
 
     // Write to the file
-    _ = try todo_file.write(contents_to_write.items);
+    _ = try todo_file.write(formatted_todo);
 
     return todo_hash;
 }
 
 fn readFileContentsToLinesAlloc(file_contents: []const u8, allocator: std.mem.Allocator) ![][]const u8 {
     var result_lines = ArrayList([]const u8).init(allocator);
-    defer result_lines.deinit();
 
     var lines_iterator = std.mem.splitScalar(u8, file_contents, '\n');
 
@@ -181,24 +175,40 @@ fn queryAndFilterTodosAlloc(todo_lines: [][]const u8, query: []const u8, allocat
     var parsed_query = try Todo.fromLineNoDescription(query, allocator);
     defer parsed_query.deinit();
 
-    var matches = ArrayList(Todo).init(allocator);
+    var matches: ArrayList(Todo) = ArrayList(Todo).init(allocator);
     defer matches.deinit();
 
     var result = ArrayList(u8).init(allocator);
-    defer result.deinit();
 
-    for (todo_lines) |line| {
-        var todo = try Todo.fromFormattedLine(line, allocator);
+    // FIXME: Not a fan of how this is handled.
+    // Skip the last line which would be empty.
+    for (todo_lines[0 .. todo_lines.len - 1]) |line| {
+        var todo: Todo = try Todo.fromFormattedLine(line, allocator);
 
         if (parsed_query.group != '-' and todo.group == parsed_query.group) {
             try matches.append(todo);
         }
+
+        if (parsed_query.tags.items.len > 0 and todo.tags.items.len > 0) {
+            outer: for (parsed_query.tags.items) |tag| {
+                for (todo.tags.items) |todo_tag| {
+                    if (std.mem.eql(u8, tag, todo_tag)) {
+                        try matches.append(todo);
+                        continue :outer;
+                    }
+                }
+            }
+        }
     }
 
-    return result.toOwnedSlice();
+    for (matches.items) |match| {
+        try result.appendSlice(try match.formatToStringAlloc(match.hash.?));
+    }
+
+    return try result.toOwnedSlice();
 }
 
-pub fn evalCommandAlloc(command: []const u8, input: ?[]const u8, allocator: std.mem.Allocator) !void {
+pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.Allocator) !void {
     const stdout = std.io.getStdOut().writer();
 
     const user_home_string = try getHomeDirAbsolute();
@@ -218,9 +228,9 @@ pub fn evalCommandAlloc(command: []const u8, input: ?[]const u8, allocator: std.
     _ = fs.openFileAbsolute(todo_file_path, .{}) catch try generateTodoFile(user_home_string);
 
     const todo_file = try std.fs.openFileAbsolute(todo_file_path, .{ .mode = .read_write });
+    defer todo_file.close();
 
     const cmd_to_enum = std.meta.stringToEnum(Commands, command) orelse {
-        // try stdout.print("Invalid Command!\n", .{});
         return error.UnknownCommand;
     };
 
@@ -249,15 +259,12 @@ pub fn evalCommandAlloc(command: []const u8, input: ?[]const u8, allocator: std.
                 try stdout.print("{s}", .{file_contents});
             } else {
                 const lines: [][]const u8 = try readFileContentsToLinesAlloc(file_contents, allocator);
+                defer allocator.free(lines);
 
                 const matching_todos = try queryAndFilterTodosAlloc(lines, input.?, allocator);
-                defer matching_todos.deinit();
+                defer allocator.free(matching_todos);
 
-                // TODO: print out these todos using the format in addTodo.
-
-                for (matching_todos.items) |td| {
-                    try stdout.print("{s}\n", .{td.description.items});
-                }
+                try stdout.print("{s}", .{matching_todos});
             }
         },
         .help => {
@@ -328,9 +335,11 @@ pub const TestQueries = struct {
         ;
 
         const lines = try readFileContentsToLinesAlloc(fake_todos, t.allocator);
+        defer t.allocator.free(lines);
 
         const result = try queryAndFilterTodosAlloc(lines, query, t.allocator);
+        defer t.allocator.free(result);
 
-        try t.expect(std.mem.eql(u8, result, fake_todos));
+        try t.expectEqualStrings("B All your todo are belong to us. (abc123)\n", result);
     }
 };
