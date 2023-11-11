@@ -25,7 +25,7 @@ pub fn main() !void {
     // The rest is optional depending on the command.
     const todo_input = args.next();
 
-    manager.evalCommandAlloc(command, todo_input, allocator) catch |err| {
+    manager.evalCommand(command, todo_input, allocator) catch |err| {
         switch (err) {
             error.EmptyLineError => {
                 try stdout.print("Can't have a todo with an empty line!\n\"{?s}\"\n", .{todo_input});
