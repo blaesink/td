@@ -33,7 +33,7 @@ fn generateTodoHash(todo_description: []const u8) ![32]u8 {
 
 /// Removes the todo from the file.
 /// TODO: This uses an ArrayList to track and remove lines. May be ineffecient.
-fn removeTodoAlloc(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem.Allocator) !void {
+fn removeTodo(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem.Allocator) !void {
 
     // Go to the beginning.
     try todo_file.seekTo(0);
@@ -47,7 +47,7 @@ fn removeTodoAlloc(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem
 
     while (lines.next()) |line| {
         if (!std.mem.containsAtLeast(u8, line, 1, todo_hash)) {
-            try lines_to_write.appendSlice(line);
+            try std.fmt.format(lines_to_write.writer(), "{s}\n", .{line});
         }
     }
 
@@ -246,7 +246,7 @@ pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.A
             const maybe_todo_hash = try getTodoFromHashAlloc(todo_file, input.?, allocator);
 
             if (maybe_todo_hash) |hash| {
-                try removeTodoAlloc(todo_file, hash, allocator);
+                try removeTodo(todo_file, hash, allocator);
                 return;
             }
             return error.NoHashFound;
@@ -314,7 +314,7 @@ pub const TestingTodo = struct {
         defer td.deinit();
 
         const added_todo_id = try addTodoAlloc(todo_file, td, t.allocator);
-        _ = try removeTodoAlloc(todo_file, &added_todo_id, t.allocator);
+        _ = try removeTodo(todo_file, &added_todo_id, t.allocator);
 
         const file_contents = try todo_file.readToEndAlloc(t.allocator, 4096);
         defer t.allocator.free(file_contents);
