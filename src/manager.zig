@@ -46,7 +46,7 @@ fn removeTodo(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem.Allo
     var lines = splitLines(file_contents);
 
     while (lines.next()) |line| {
-        if (!std.mem.containsAtLeast(u8, line, 1, todo_hash)) {
+        if (!std.mem.containsAtLeast(u8, line, 1, todo_hash) and (line.len > 1)) {
             try std.fmt.format(lines_to_write.writer(), "{s}\n", .{line});
         }
     }
