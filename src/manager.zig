@@ -60,11 +60,11 @@ fn removeTodo(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem.Allo
     _ = try todo_file.write(lines_to_write.items);
 }
 
-fn addTodoAlloc(todo_file: fs.File, todo: Todo, allocator: std.mem.Allocator) ![32]u8 {
+fn addTodo(todo_file: fs.File, todo: Todo, allocator: std.mem.Allocator) ![32]u8 {
     const todo_hash = try generateTodoHash(todo.description);
 
     // TODO: check that we already have this file generated.
-    if (try getTodoFromHashAlloc(todo_file, &todo_hash, allocator) != null) {
+    if (try getTodoFromHash(todo_file, &todo_hash, allocator) != null) {
         return error.ExistingHashFound;
     }
 
@@ -109,7 +109,7 @@ fn splitLinesPosix(file_contents: []const u8) std.mem.SplitIterator(u8, .scalar)
 }
 
 /// TODO: this is going to be really, really bad because it's linear search.
-fn getTodoFromHashAlloc(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem.Allocator) !?[]const u8 {
+fn getTodoFromHash(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem.Allocator) !?[]const u8 {
     // Read each line and see if the hash is there. Again, bad.
 
     // TODO: 4096 bytes isn't that big.
@@ -133,7 +133,7 @@ fn getHomeDirAbsolute() ![]const u8 {
     };
 }
 
-fn maybeGenerateConfigFileAlloc(allocator: std.mem.Allocator) !void {
+fn maybeGenerateConfigFile(allocator: std.mem.Allocator) !void {
     const stdin = std.io.getStdIn().reader();
     const stdout = std.io.getStdOut().writer();
     var choice: [1:0]u8 = undefined;
@@ -217,7 +217,7 @@ pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.A
 
     // TODO: this is just to check that we have a config file by the time we want to use it.
     fs.accessAbsolute(config_file_string, .{}) catch {
-        try maybeGenerateConfigFileAlloc(allocator);
+        try maybeGenerateConfigFile(allocator);
     };
 
     // Could free `config_file_string` right here.
@@ -239,11 +239,11 @@ pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.A
             // Remove surrounding quotation marks.
             var td = try Todo.fromLine(input.?[0..input.?.len], allocator);
             defer td.deinit();
-            const id = try addTodoAlloc(todo_file, td, allocator);
+            const id = try addTodo(todo_file, td, allocator);
             std.debug.print("{s}\n", .{id});
         },
         .remove, .rm => {
-            const maybe_todo_hash = try getTodoFromHashAlloc(todo_file, input.?, allocator);
+            const maybe_todo_hash = try getTodoFromHash(todo_file, input.?, allocator);
 
             if (maybe_todo_hash) |hash| {
                 try removeTodo(todo_file, hash, allocator);
@@ -297,7 +297,7 @@ pub const TestingTodo = struct {
         var td = try Todo.fromLine("Hello World!", t.allocator);
         defer td.deinit();
 
-        const added_todo_id = try addTodoAlloc(todo_file, td, t.allocator);
+        const added_todo_id = try addTodo(todo_file, td, t.allocator);
 
         try std.testing.expect(added_todo_id.len > 0);
 
@@ -313,7 +313,7 @@ pub const TestingTodo = struct {
         var td = try Todo.fromLine("Hello World!", t.allocator);
         defer td.deinit();
 
-        const added_todo_id = try addTodoAlloc(todo_file, td, t.allocator);
+        const added_todo_id = try addTodo(todo_file, td, t.allocator);
         _ = try removeTodo(todo_file, &added_todo_id, t.allocator);
 
         const file_contents = try todo_file.readToEndAlloc(t.allocator, 4096);
