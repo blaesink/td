@@ -2,11 +2,25 @@ const std = @import("std");
 const t = std.testing;
 const expect = std.testing.expect;
 const ArrayList = std.ArrayList;
+const md5 = std.crypto.hash.Md5;
 
 pub const Errors = error{
     EmptyLineError,
     FoundMultipleGroups,
 };
+
+/// Generates a string hash from the `Todo`'s description.
+/// Returns the generated hash.
+fn generateTodoHash(todo_description: []const u8) ![32]u8 {
+    var hash_buf: [md5.digest_length]u8 = undefined;
+    var output: [32]u8 = undefined;
+
+    md5.hash(todo_description, &hash_buf, .{});
+
+    _ = try std.fmt.bufPrint(&output, "{s}", .{std.fmt.fmtSliceHexLower(&hash_buf)});
+
+    return output;
+}
 
 /// Split a string between `start_index` and `end_index` and add its contents to `tags`.
 fn generateTags(
@@ -43,7 +57,7 @@ pub const Todo = struct {
     tags: ArrayList([]const u8),
     group: u8, // Single character
     allocator: std.mem.Allocator,
-    hash: ?[]const u8 = null,
+    hash: []const u8,
 
     /// For use in creating a todo when it's already written into a todo file.
     pub fn fromFormattedLine(line: []const u8, allocator: std.mem.Allocator) !Self {
@@ -127,11 +141,14 @@ pub const Todo = struct {
             }
         }
 
+        const hash = try generateTodoHash(description.items);
+
         return .{
             .description = try description.toOwnedSlice(),
             .group = group,
             .tags = tags,
             .allocator = allocator,
+            .hash = &hash,
         };
     }
 
@@ -160,6 +177,7 @@ pub const Todo = struct {
             .group = group,
             .tags = tags,
             .allocator = allocator,
+            .hash = "", // Don't care.
         };
     }
 
@@ -169,27 +187,26 @@ pub const Todo = struct {
     }
 
     /// Return a nicely formatted string of this object (how it was written).
-    pub fn formatToStringAlloc(self: Self, hash: []const u8) ![]const u8 {
+    pub fn formatToStringAlloc(self: Self) ![]const u8 {
         var contents_to_write = ArrayList(u8).init(self.allocator);
-        defer contents_to_write.deinit();
+
+        const writer = contents_to_write.writer();
 
         if (self.tags.items.len > 0) {
             var tag_string = ArrayList(u8).init(self.allocator);
             defer tag_string.deinit();
 
-            const tag_string_writer = tag_string.writer();
-
             // Format the tags.
             for (self.tags.items) |tag| {
-                try std.fmt.format(tag_string_writer, "+{s} ", .{tag});
+                try std.fmt.format(tag_string.writer(), "+{s} ", .{tag});
             }
 
             // Remove the last space from the string because I'm too lazy to do a conditional above.
             _ = tag_string.pop();
 
-            try std.fmt.format(contents_to_write.writer(), "{c} {s} {s} ({s})\n", .{ self.group, self.description, tag_string.items, hash });
+            try std.fmt.format(writer, "{c} {s} {s} ({s})\n", .{ self.group, self.description, tag_string.items, self.hash });
         } else {
-            try std.fmt.format(contents_to_write.writer(), "{c} {s} ({s})\n", .{ self.group, self.description, hash });
+            try std.fmt.format(writer, "{c} {s} ({s})\n", .{ self.group, self.description, self.hash });
         }
 
         return contents_to_write.toOwnedSlice();
@@ -205,10 +222,11 @@ test "Can't have multiple groups in a Todo" {
 }
 
 test "Single Group Todo" {
-    var td = try Todo.fromLine("Hello World! &A", t.allocator);
+    const td = try Todo.fromLine("Hello World! &A", t.allocator);
     defer td.deinit();
 
-    try t.expectEqualSlices(u8, "Hello World!", td.description);
+    try t.expectEqualStrings("Hello World!", td.description);
+    // try t.expectEqual(td.group, 'A');
 }
 
 test "Make a Todo" {
@@ -228,11 +246,12 @@ test "Check formatting" {
     const line = "Hello World! +Newbie &A";
 
     var td = try Todo.fromLine(line, t.allocator);
+    td.hash = "abc123";
     defer td.deinit();
 
     const expected_format = "A Hello World! +Newbie (abc123)\n";
 
-    const actual_format = try td.formatToStringAlloc("abc123");
+    const actual_format = try td.formatToStringAlloc();
     defer t.allocator.free(actual_format);
 
     try t.expectEqualStrings(expected_format, actual_format);
@@ -254,19 +273,36 @@ test "Make a todo with No Description (for Querying)" {
 }
 
 test "Reconstruct from a formatted line" {
-    const line = "B All your todo are belong to us. +1337 (abc123) ";
+    const line = "B All your todo are belong to us. +1337 (abc123)";
 
     const todo = try Todo.fromFormattedLine(line, t.allocator);
     defer todo.deinit();
 
     try t.expect(todo.group == 'B');
     try t.expectEqualStrings("All your todo are belong to us.", todo.description);
-    try t.expectEqualStrings("abc123", todo.hash.?);
+    try t.expectEqualStrings("abc123", todo.hash);
 }
 
 test "Make a simple query" {
-    const todo = try Todo.fromLineNoDescription("&B", t.allocator);
-    defer todo.deinit();
+    const query = try Todo.fromLineNoDescription("&B", t.allocator);
+    defer query.deinit();
 
-    try t.expect(todo.group == 'B');
+    try t.expect(query.group == 'B');
+}
+
+test "More complex query" {
+    const query = try Todo.fromLineNoDescription("+A +C &B", t.allocator);
+    defer query.deinit();
+
+    try t.expect(query.group == 'B');
+    const expected_tags = [_][]const u8{ "A", "C" };
+
+    for (expected_tags, query.tags.items) |expected, actual| {
+        try t.expectEqualStrings(expected, actual);
+    }
+}
+
+test "Generating a hash" {
+    const actual = try generateTodoHash("Hi mom!");
+    try t.expectEqualStrings("ea7e8167ce8b6ad93d43ac5aa869a920", &actual);
 }
