@@ -47,9 +47,7 @@ fn removeTodo(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem.Allo
 
 fn addTodo(todo_file: fs.File, todo: Todo, allocator: std.mem.Allocator) ![]const u8 {
     // TODO: check that we already have this file generated.
-    if (try getTodoFromHash(todo_file, todo.hash, allocator) != null) {
-        return error.ExistingHashFound;
-    }
+    if (try getTodoFromHash(todo_file, todo.hash, allocator) != null) return error.ExistingHashFound;
 
     // Go to the end of the file to start appending to.
     try todo_file.seekTo(try todo_file.getEndPos());
@@ -296,34 +294,20 @@ pub const TestingTodo = struct {
     }
 };
 
-test "A simple query" {
-    const query = "&B";
+pub const TestQueries = struct {
+    test "A simple query" {
+        const query = "&B";
 
-    const fake_todos = "B All your todo are belong to us. (abc123)\n";
+        const fake_todos = "B All your todo are belong to us. (abc123)\n";
 
-    const lines = try readFileContentsToLinesAlloc(fake_todos, t.allocator);
-    defer t.allocator.free(lines);
+        const lines = try readFileContentsToLinesAlloc(fake_todos, t.allocator);
+        defer t.allocator.free(lines);
 
-    const result = try queryAndFilterTodosAlloc(lines, query, t.allocator);
-    defer t.allocator.free(result);
+        const result = try queryAndFilterTodosAlloc(lines, query, t.allocator);
+        defer t.allocator.free(result);
 
-    try t.expect(result.len > 0);
+        try t.expect(result.len > 0);
 
-    try t.expectEqualStrings(fake_todos, result);
-}
-
-test "Group A or Group B" {
-    const query = "&B or &A";
-
-    const fake_todos =
-        \\B All your todo are belong to us. (abc123)
-    ;
-
-    const lines = try readFileContentsToLinesAlloc(fake_todos, t.allocator);
-    defer t.allocator.free(lines);
-
-    const result = try queryAndFilterTodosAlloc(lines, query, t.allocator);
-    defer t.allocator.free(result);
-
-    try t.expectEqualStrings("B All your todo are belong to us. (abc123)\n", result);
-}
+        try t.expectEqualStrings(fake_todos, result);
+    }
+};
