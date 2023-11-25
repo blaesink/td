@@ -23,116 +23,99 @@ const std = @import("std");
 const t = std.testing;
 const expect = std.testing.expect;
 
-const OpType = enum {
+const Token = union(enum) {
+    ident: []const u8,
+
     @"and",
     @"or",
     not,
+    eof,
+    illegal,
+
+    pub fn match(word: []const u8) ?Token {
+        const map = std.ComptimeStringMap(Token, .{
+            .{ "and", .@"and" },
+            .{ "or", .@"or" },
+            .{ "not", .not },
+        });
+        return map.get(word);
+    }
 };
 
-const Lexeme = struct {
-    item: union(enum) {
-        op: OpType,
-        ident: []const u8,
-    },
-};
+const Lexer = struct {
+    const Self = @This();
 
-const OperationPhrase = struct {
-    type: OpType,
-    arguments: []const Lexeme,
-};
+    query: []const u8,
+    position: usize = 0, // where we are now
+    read_position: usize = 1, // for "peeking"
+    current_char: u8, // current char
 
-fn wordToLexeme(word: []const u8) Lexeme {
-    // If null at the end, then it's .ident.
-    var node_type: ?OpType = null;
-
-    // NOTE: this requires per-character scanning which isn't implemented.
-    if (word.len == 0) {
-        node_type = switch (word[0]) {
-            '&' => .@"and",
-            '|' => .@"or",
-            '!' => .not,
-            else => null,
+    pub fn init(query: []const u8) Self {
+        return .{
+            .query = query,
+            .current_char = query[0],
         };
-    } else {
-        node_type = std.meta.stringToEnum(OpType, word);
     }
 
-    if (node_type != null)
-        return Lexeme{ .item = .{ .op = node_type.? } };
-
-    return Lexeme{ .item = .{ .ident = word } };
-}
-
-/// TODO: per-character scanning.
-fn lexAlloc(input: []const u8, allocator: std.mem.Allocator) ![]Lexeme {
-    var tokens = std.ArrayList(Lexeme).init(allocator);
-
-    var token_iterator = std.mem.splitScalar(u8, input, ' ');
-
-    while (token_iterator.next()) |word| {
-        try tokens.append(wordToLexeme(word));
-    }
-
-    return tokens.toOwnedSlice();
-}
-
-fn parseAlloc(input: []const u8, allocator: std.mem.Allocator) ![]OperationPhrase {
-    var phrases = std.ArrayList(OperationPhrase).init(allocator);
-
-    const lexemes = try lexAlloc(input, allocator);
-    defer allocator.free(lexemes);
-
-    var previous: ?Lexeme = null;
-    _ = previous;
-    var next: ?Lexeme = null;
-    _ = next;
-
-    // TODO: build the tree
-    for (lexemes, 0..) |lex, i| {
-        _ = lex;
-        // Can't look out of bounds!
-        if (i >= lexemes.len) break;
-
-        switch (lexemes[i + 1]) {
-            .ident => continue,
+    /// Skips all whitespace until an alphanumeric character is hit.
+    fn skipWhitespace(self: *Self) void {
+        while (std.ascii.isWhitespace(self.current_char)) {
+            self.next();
         }
     }
-    return phrases.toOwnedSlice();
-}
 
-test "Lex a simple query" {
-    const input = "&A and &B";
-    const expected = [_]Lexeme{
-        Lexeme{ .item = .{ .ident = "&A" } },
-        Lexeme{ .item = .{ .op = .@"and" } },
-        Lexeme{ .item = .{ .ident = "&B" } },
-    };
+    fn peek(self: Self) u8 {
+        if (self.read_position >= self.query.len) return 0;
 
-    const actual = try lexAlloc(input, t.allocator);
-    defer t.allocator.free(actual);
-
-    // Can't use expectEqualSlices here because of tagged unions in the structs.
-    for (expected, actual) |e, a| {
-        try t.expectEqualDeep(e, a);
+        return self.query[self.read_position];
     }
-}
 
-test "Parse a simple query" {
-    const input = "&A and &B";
+    fn next(self: *Self) void {
+        if (self.read_position >= self.query.len) {
+            self.current_char = 0;
+        } else {
+            self.current_char = self.query[self.read_position];
+        }
 
-    const expected = [_]OperationPhrase{
-        OperationPhrase{
-            .type = .@"and",
-            .arguments = &[_]Lexeme{
-                Lexeme{ .item = .{ .ident = "&A" } },
-                Lexeme{ .item = .{ .ident = "&B" } },
+        self.position = self.read_position;
+        self.read_position += 1;
+    }
+
+    /// Scan forward until we can no longer build a word.
+    fn readWord(self: *Self) []const u8 {
+        const start_position = self.position;
+        while (std.ascii.isAlphanumeric(self.current_char)) {
+            self.next();
+        }
+
+        return self.query[start_position..self.position];
+    }
+
+    fn nextToken(self: *Self) Token {
+        self.skipWhitespace();
+
+        const token: Token = switch (self.current_char) {
+            'a'...'z', 'A'...'Z' => {
+                const word = self.readWord();
+
+                if (Token.match(word)) |tok|
+                    return tok;
+
+                return .{ .ident = word };
             },
-        },
-    };
+            '!' => .not,
+            else => .eof,
+        };
 
-    const actual = try parseAlloc(input, t.allocator);
-    defer t.allocator.free(actual);
+        self.next();
+        return token;
+    }
+};
 
-    try t.expect(actual.len == 1);
-    try t.expectEqualDeep(expected[0], actual[0]);
+test "Check a simple query" {
+    var lex = Lexer.init("&A and &B");
+
+    try t.expectEqualStrings("&A", lex.nextToken().ident);
+    try t.expectEqualDeep(Token.not, lex.nextToken());
+    try t.expectEqualStrings("&B", lex.nextToken().ident);
 }
