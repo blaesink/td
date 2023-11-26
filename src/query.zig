@@ -57,10 +57,10 @@ const Lexer = struct {
         };
     }
 
-    /// Skips all whitespace until an alphanumeric character is hit.
+    /// Skips all whitespace until a non whitespace character is hit.
     fn skipWhitespace(self: *Self) void {
         while (std.ascii.isWhitespace(self.current_char)) {
-            self.next();
+            self.advanceChar();
         }
     }
 
@@ -70,7 +70,7 @@ const Lexer = struct {
         return self.query[self.read_position];
     }
 
-    fn next(self: *Self) void {
+    fn advanceChar(self: *Self) void {
         if (self.read_position >= self.query.len) {
             self.current_char = 0;
         } else {
@@ -81,11 +81,11 @@ const Lexer = struct {
         self.read_position += 1;
     }
 
-    /// Scan forward until we can no longer build a word.
+    /// Scan forward until we can no longer build a word out of alphanumeric characters.
     fn readWord(self: *Self) []const u8 {
         const start_position = self.position;
         while (std.ascii.isAlphanumeric(self.current_char)) {
-            self.next();
+            self.advanceChar();
         }
 
         return self.query[start_position..self.position];
@@ -95,27 +95,89 @@ const Lexer = struct {
         self.skipWhitespace();
 
         const token: Token = switch (self.current_char) {
+            '&', '+' => {
+                switch (self.peek()) {
+                    'a'...'z', 'A'...'Z' => {
+                        self.advanceChar();
+                        const word = self.readWord();
+
+                        return .{ .ident = word };
+                    },
+                    else => return .illegal,
+                }
+            },
             'a'...'z', 'A'...'Z' => {
                 const word = self.readWord();
 
-                if (Token.match(word)) |tok|
-                    return tok;
+                if (Token.match(word)) |tok| return tok;
 
                 return .{ .ident = word };
             },
-            '!' => .not,
-            else => .eof,
+            else => .illegal,
         };
-
-        self.next();
         return token;
     }
 };
 
-test "Check a simple query" {
-    var lex = Lexer.init("&A and &B");
+test "Test Peeking" {
+    {
+        var lex = Lexer.init("ABCDE");
 
-    try t.expectEqualStrings("&A", lex.nextToken().ident);
+        try t.expect(lex.peek() == 'B');
+        lex.advanceChar();
+        try t.expect(lex.peek() == 'C');
+    }
+    {
+        var lex = Lexer.init("ABC");
+        lex.advanceChar();
+        lex.advanceChar();
+        try t.expect(lex.peek() == 0);
+    }
+}
+
+test "Collecting a word" {
+    var lex = Lexer.init("Hi mom!");
+
+    try t.expectEqualStrings("Hi", lex.readWord());
+    lex.skipWhitespace();
+    try t.expectEqualStrings("mom", lex.readWord());
+}
+
+test "Bad queries" {
+    {
+        var lex = Lexer.init("&&");
+        try t.expectEqualDeep(Token.illegal, lex.nextToken());
+    }
+    {
+        var lex = Lexer.init("&+");
+        try t.expectEqualDeep(Token.illegal, lex.nextToken());
+    }
+    {
+        var lex = Lexer.init("& ");
+        try t.expectEqualDeep(Token.illegal, lex.nextToken());
+    }
+}
+
+test "Two word queries" {
+    var lex = Lexer.init("not &A");
+
     try t.expectEqualDeep(Token.not, lex.nextToken());
-    try t.expectEqualStrings("&B", lex.nextToken().ident);
+    try t.expectEqualDeep(.{ .ident = "&A" }, lex.nextToken());
+}
+
+test "Lex a simple query" {
+    {
+        var lex = Lexer.init("&A and &B");
+
+        try t.expectEqualDeep(.{ .ident = "&A" }, lex.nextToken());
+        try t.expectEqualDeep(Token.@"and", lex.nextToken());
+        try t.expectEqualDeep(.{ .ident = "&B" }, lex.nextToken());
+    }
+    {
+        var lex = Lexer.init("&A or &B");
+
+        try t.expectEqualDeep(.{ .ident = "&A" }, lex.nextToken());
+        try t.expectEqualDeep(Token.@"or", lex.nextToken());
+        try t.expectEqualDeep(.{ .ident = "&B" }, lex.nextToken());
+    }
 }
