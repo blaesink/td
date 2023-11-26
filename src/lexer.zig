@@ -1,29 +1,8 @@
-// This module generates query ASTs.
-//
-// not &A and not &B
-//  |   |  |   |   |
-//  op  |  op  op  |
-//    ident        ident
-//
-//
-//        S
-//      /   \
-//     OP    OP
-//     /\    / \
-//   op  i   op \
-//   |   |   |   \
-//  not  &A and   \
-//                OP
-//                /\
-//              op  i
-//              |   |
-//             not  &B
-
 const std = @import("std");
 const t = std.testing;
 const expect = std.testing.expect;
 
-const Token = union(enum) {
+pub const Token = union(enum) {
     ident: []const u8,
 
     @"and",
@@ -42,7 +21,7 @@ const Token = union(enum) {
     }
 };
 
-const Lexer = struct {
+pub const Lexer = struct {
     const Self = @This();
 
     query: []const u8,
