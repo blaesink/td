@@ -3,7 +3,8 @@ const t = std.testing;
 const expect = std.testing.expect;
 
 pub const Token = union(enum) {
-    ident: []const u8,
+    group: []const u8,
+    tag: []const u8,
 
     @"and",
     @"or",
@@ -75,12 +76,16 @@ pub const Lexer = struct {
 
         const token: Token = switch (self.current_char) {
             '&', '+' => {
+                const char = self.current_char;
                 switch (self.peek()) {
                     'a'...'z', 'A'...'Z' => {
                         self.advanceChar();
                         const word = self.readWord();
 
-                        return .{ .ident = word };
+                        if (char == '&')
+                            return .{ .group = word };
+
+                        return .{ .tag = word };
                     },
                     else => return .illegal,
                 }
@@ -88,13 +93,33 @@ pub const Lexer = struct {
             'a'...'z', 'A'...'Z' => {
                 const word = self.readWord();
 
-                if (Token.match(word)) |tok| return tok;
+                if (Token.match(word)) |tok|
+                    return tok;
 
-                return .{ .ident = word };
+                return .illegal;
             },
-            else => .illegal,
+            else => .eof,
         };
         return token;
+    }
+
+    /// Rust style collection of an iterable-type into a slice.
+    /// Should only be used on a new (unmodified) Lexer.
+    pub fn collectAlloc(self: *Self, allocator: std.mem.Allocator) ![]Token {
+        var tokens = std.ArrayList(Token).init(allocator);
+
+        var current_token: Token = undefined;
+
+        while (current_token != .eof) {
+            current_token = self.nextToken();
+
+            if (current_token == .illegal)
+                return error.IllegalQueryFormat;
+
+            try tokens.append(current_token);
+        }
+
+        return tokens.toOwnedSlice();
     }
 };
 
@@ -141,22 +166,61 @@ test "Two word queries" {
     var lex = Lexer.init("not &A");
 
     try t.expectEqualDeep(Token.not, lex.nextToken());
-    try t.expectEqualDeep(.{ .ident = "&A" }, lex.nextToken());
+    try t.expectEqualDeep(.{ .group = "A" }, lex.nextToken());
 }
 
 test "Lex a simple query" {
     {
         var lex = Lexer.init("&A and &B");
 
-        try t.expectEqualDeep(.{ .ident = "&A" }, lex.nextToken());
+        try t.expectEqualDeep(.{ .group = "A" }, lex.nextToken());
         try t.expectEqualDeep(Token.@"and", lex.nextToken());
-        try t.expectEqualDeep(.{ .ident = "&B" }, lex.nextToken());
+        try t.expectEqualDeep(.{ .group = "B" }, lex.nextToken());
     }
     {
         var lex = Lexer.init("&A or &B");
 
-        try t.expectEqualDeep(.{ .ident = "&A" }, lex.nextToken());
+        try t.expectEqualDeep(.{ .group = "A" }, lex.nextToken());
         try t.expectEqualDeep(Token.@"or", lex.nextToken());
-        try t.expectEqualDeep(.{ .ident = "&B" }, lex.nextToken());
+        try t.expectEqualDeep(.{ .group = "B" }, lex.nextToken());
+    }
+}
+
+test "Can't collect an illegal query" {
+    var l = Lexer.init("&&");
+    try t.expectError(error.IllegalQueryFormat, l.collectAlloc(t.allocator));
+
+    l = Lexer.init("&+");
+    try t.expectError(error.IllegalQueryFormat, l.collectAlloc(t.allocator));
+}
+
+test "Collect one word" {
+    var l = Lexer.init("&A");
+    const tokens = try l.collectAlloc(t.allocator);
+    defer t.allocator.free(tokens);
+    const expected = [_]Token{
+        .{ .group = "A" },
+        .eof,
+    };
+
+    for (expected, tokens) |e, a| {
+        try t.expectEqualDeep(e, a);
+    }
+}
+
+test "Collecting a new lexer into a slice" {
+    var l = Lexer.init("&A or &B");
+    const actual = try l.collectAlloc(t.allocator);
+    defer t.allocator.free(actual);
+
+    const expected = [_]Token{
+        .{ .group = "A" },
+        .@"or",
+        .{ .group = "B" },
+        .eof,
+    };
+
+    for (&expected, actual) |e, a| {
+        try t.expectEqualDeep(e, a);
     }
 }
