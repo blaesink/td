@@ -55,3 +55,8 @@ const Parser = struct {
         _ = self;
     }
 };
+
+// test "Checking a few tokens" {
+//     var l = lexer.Lexer.init("Hi Mom!");
+//     var p = Parser.init();
+// }
