@@ -5,6 +5,7 @@ const expect = std.testing.expect;
 pub const Token = union(enum) {
     group: []const u8,
     tag: []const u8,
+    ident: []const u8,
 
     @"and",
     @"or",
@@ -96,8 +97,9 @@ pub const Lexer = struct {
                 if (Token.match(word)) |tok|
                     return tok;
 
-                return .illegal;
+                return .{ .ident = word };
             },
+            // TODO: handle `!` and `|` chars.
             else => .eof,
         };
         return token;

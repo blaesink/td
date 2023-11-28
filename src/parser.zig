@@ -1,11 +1,39 @@
 const std = @import("std");
+const t = std.testing;
 const lexer = @import("lexer.zig");
 const Token = lexer.Token;
 
+const And = struct {
+    left: Token,
+    right: Token,
+};
+
+const Or = struct {
+    left: Token,
+    right: Token,
+};
+
+const Not = struct {
+    right: Token,
+};
+
+const Node = union(enum) {
+    @"and": And,
+    @"or": Or,
+    not: Not,
+};
+
+/// Rules
+/// ===
+/// S  -> (I) VP+
+/// VP -> V I
+/// VP -> I V I
+/// VP -> V
 const Parser = struct {
     const Self = @This();
 
     tokens: []Token,
+    allocator: std.mem.Allocator,
     position: usize = 0,
     read_position: usize = 1,
 
@@ -14,23 +42,25 @@ const Parser = struct {
     previous_token: Token = undefined,
     current_token: Token,
 
-    pub fn init(tokens: []Token) Self {
+    pub fn init(tokens: []Token, allocator: std.mem.Allocator) Self {
         return .{
             .tokens = tokens,
+            .allocator = allocator,
             .current_token = tokens[0],
         };
     }
 
-    pub fn peekToken(self: Self) ?Token {
+    pub fn peekToken(self: Self) Token {
         if (self.read_position >= self.tokens.len)
-            return null;
+            return .eof;
 
         return self.tokens[self.read_position];
     }
 
-    pub fn advanceToken(self: *Self) !void {
-        if (self.read_position >= self.tokens.len)
-            return error.OutOfBounds;
+    pub fn advanceToken(self: *Self) void {
+        if (self.read_position >= self.tokens.len) {
+            return;
+        }
 
         self.previous_token = self.current_token;
         self.position = self.read_position;
@@ -38,25 +68,91 @@ const Parser = struct {
         self.read_position += 1;
     }
 
-    fn @"and"(self: *Self, left: Token, right: Token) !void {
-        _ = right;
-        _ = left;
-        _ = self;
+    pub fn deinit(self: *Self) void {
+        self.allocator.free(self.tokens);
     }
 
-    fn @"or"(self: *Self, left: Token, right: Token) !void {
-        _ = right;
-        _ = left;
-        _ = self;
-    }
+    pub fn parseAlloc(self: *Self) ![]Node {
+        var nodes = std.ArrayList(Node).init(self.allocator);
 
-    fn not(self: *Self, right: Token) !void {
-        _ = right;
-        _ = self;
+        while (self.current_token != .eof) blk: {
+            var this_node: Node = undefined;
+
+            switch (self.current_token) {
+                // Just some generic identifier.
+                .tag, .group => {
+                    const next_token = self.peekToken();
+
+                    switch (next_token) {
+                        .@"and", .@"or" => {
+                            // Move forward to check the token after the possible binary operator.
+                            self.advanceToken();
+
+                            const rhs = self.peekToken();
+                            switch (rhs) {
+                                .tag, .group => {
+                                    if (next_token == .@"and") {
+                                        this_node = .{ .@"and" = .{ .left = self.current_token, .right = rhs } };
+                                    } else {
+                                        this_node = .{ .@"or" = .{ .left = self.current_token, .right = rhs } };
+                                    }
+                                },
+                                else => break :blk,
+                            }
+                        },
+                        else => break :blk,
+                    }
+                },
+                .not => {
+                    const rhs = self.peekToken();
+                    switch (rhs) {
+                        .tag, .group => this_node = .{ .not = .{ .right = rhs } },
+                        else => break :blk,
+                    }
+                },
+                else => break,
+            }
+            try nodes.append(this_node);
+        }
+
+        return nodes.toOwnedSlice();
     }
 };
 
-// test "Checking a few tokens" {
-//     var l = lexer.Lexer.init("Hi Mom!");
-//     var p = Parser.init();
-// }
+test "Checking a few tokens" {
+    var l = lexer.Lexer.init("Hi Mom");
+    var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
+    defer p.deinit();
+
+    try t.expectEqualDeep(.{ .ident = "Hi" }, p.peekToken());
+    p.advanceToken();
+    try t.expectEqualDeep(.{ .ident = "Mom" }, p.peekToken());
+    p.advanceToken();
+    try t.expectEqual(Token.eof, p.peekToken());
+}
+
+test "Going out of bounds" {
+    var l = lexer.Lexer.init("One Two");
+    var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
+    defer p.deinit();
+
+    // Go way out of bounds.
+    for (0..10) |_| {
+        p.advanceToken();
+    }
+
+    try t.expectEqual(Token.eof, p.current_token);
+}
+
+test "Parse a simple query" {
+    var l = lexer.Lexer.init("&A and &B");
+    var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
+    defer p.deinit();
+
+    const expected = [_]Node{
+        .{ .@"and" = .{ .left = .{ .group = "A" }, .right = .{ .group = "B" } } },
+    };
+
+    const actual = try p.parseAlloc();
+    try t.expectEqualDeep(expected[0], actual[0]);
+}
