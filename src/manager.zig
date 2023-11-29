@@ -202,6 +202,8 @@ pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.A
         return error.UnknownCommand;
     };
 
+    if (cmd_to_enum != .ls and input == null) return error.MissingArgument;
+
     switch (cmd_to_enum) {
         .add => {
             // Remove surrounding quotation marks.
@@ -223,16 +225,16 @@ pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.A
             const file_contents = try todo_file.readToEndAlloc(allocator, 4096);
             defer allocator.free(file_contents);
 
-            if (input == null) {
-                try stdout.print("{s}", .{file_contents});
-            } else {
+            if (input) |text| {
                 const lines: [][]const u8 = try readFileContentsToLinesAlloc(file_contents, allocator);
                 defer allocator.free(lines);
 
-                const matching_todos = try queryAndFilterTodosAlloc(lines, input.?, allocator);
+                const matching_todos = try queryAndFilterTodosAlloc(lines, text, allocator);
                 defer allocator.free(matching_todos);
 
                 try stdout.print("{s}", .{matching_todos});
+            } else {
+                try stdout.print("{s}", .{file_contents});
             }
         },
         .help => {

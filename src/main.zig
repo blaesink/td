@@ -39,6 +39,9 @@ pub fn main() !void {
             error.UnknownCommand => {
                 try stdout.print("Can't handle supplied command: `{s}`!\n", .{command});
             },
+            error.MissingArgument => {
+                try stdout.print("This command needs more context!\n", .{});
+            },
             else => {
                 @panic("Unknown error!");
             },
