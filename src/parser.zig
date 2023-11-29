@@ -74,44 +74,37 @@ const Parser = struct {
 
     pub fn parseAlloc(self: *Self) ![]Node {
         var nodes = std.ArrayList(Node).init(self.allocator);
+        errdefer nodes.deinit();
 
-        while (self.current_token != .eof) blk: {
-            var this_node: Node = undefined;
-
-            switch (self.current_token) {
+        while (self.current_token != .eof) {
+            const this_node = switch (self.current_token) {
                 // Just some generic identifier.
-                .tag, .group => {
-                    const next_token = self.peekToken();
+                .tag, .group => blk: {
+                    const lhs = self.current_token;
+                    const maybe_operator_token = self.peekToken();
 
-                    switch (next_token) {
-                        .@"and", .@"or" => {
-                            // Move forward to check the token after the possible binary operator.
-                            self.advanceToken();
+                    if (maybe_operator_token == .@"and" or maybe_operator_token == .@"or") {
+                        self.advanceToken();
 
-                            const rhs = self.peekToken();
-                            switch (rhs) {
-                                .tag, .group => {
-                                    if (next_token == .@"and") {
-                                        this_node = .{ .@"and" = .{ .left = self.current_token, .right = rhs } };
-                                    } else {
-                                        this_node = .{ .@"or" = .{ .left = self.current_token, .right = rhs } };
-                                    }
-                                },
-                                else => break :blk,
-                            }
-                        },
-                        else => break :blk,
+                        const rhs = self.peekToken();
+
+                        if (rhs == .tag or rhs == .group) {
+                            if (maybe_operator_token == .@"and")
+                                break :blk Node{ .@"and" = .{ .left = lhs, .right = rhs } };
+                            break :blk Node{ .@"or" = .{ .left = lhs, .right = rhs } };
+                        }
                     }
                 },
-                .not => {
+                .not => blk: {
                     const rhs = self.peekToken();
                     switch (rhs) {
-                        .tag, .group => this_node = .{ .not = .{ .right = rhs } },
-                        else => break :blk,
+                        .tag, .group => break :blk Node{ .not = .{ .right = rhs } },
+                        else => return error.IllegalFormat,
                     }
                 },
-                else => break,
-            }
+                else => return error.IllegalFormat,
+            };
+            self.advanceToken();
             try nodes.append(this_node);
         }
 
@@ -145,14 +138,45 @@ test "Going out of bounds" {
 }
 
 test "Parse a simple query" {
-    var l = lexer.Lexer.init("&A and &B");
-    var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
-    defer p.deinit();
+    {
+        var l = lexer.Lexer.init("&A and &B");
+        var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
+        defer p.deinit();
 
-    const expected = [_]Node{
-        .{ .@"and" = .{ .left = .{ .group = "A" }, .right = .{ .group = "B" } } },
-    };
+        const expected = .{ .@"and" = .{ .left = .{ .group = "A" }, .right = .{ .group = "B" } } };
 
-    const actual = try p.parseAlloc();
-    try t.expectEqualDeep(expected[0], actual[0]);
+        const actual = try p.parseAlloc();
+        defer t.allocator.free(actual);
+        try t.expectEqualDeep(expected, actual[0]);
+    }
+    {
+        var l = lexer.Lexer.init("&A or &B");
+        var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
+        defer p.deinit();
+
+        const expected = [_]Node{
+            .{ .@"or" = .{ .left = .{ .group = "A" }, .right = .{ .group = "B" } } },
+        };
+
+        const actual = try p.parseAlloc();
+        defer t.allocator.free(actual);
+        try t.expectEqualDeep(expected[0], actual[0]);
+    }
+}
+
+test "Bad queries" {
+    {
+        var l = lexer.Lexer.init("not not");
+        var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
+        defer p.deinit();
+
+        try t.expectError(error.IllegalFormat, p.parseAlloc());
+    }
+    {
+        var l = lexer.Lexer.init("and and");
+        var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
+        defer p.deinit();
+
+        try t.expectError(error.IllegalFormat, p.parseAlloc());
+    }
 }
