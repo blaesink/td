@@ -88,6 +88,9 @@ const Parser = struct {
 
                         const rhs = self.peekToken();
 
+                        if (rhs == .group and lhs == .group and maybe_operator_token == .@"and")
+                            return error.IllegalFormat;
+
                         if (rhs == .tag or rhs == .group) {
                             if (maybe_operator_token == .@"and")
                                 break :blk Node{ .@"and" = .{ .left = lhs, .right = rhs } };
@@ -139,11 +142,11 @@ test "Going out of bounds" {
 
 test "Parse a simple query" {
     {
-        var l = lexer.Lexer.init("&A and &B");
+        var l = lexer.Lexer.init("+A and +B");
         var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
         defer p.deinit();
 
-        const expected = .{ .@"and" = .{ .left = .{ .group = "A" }, .right = .{ .group = "B" } } };
+        const expected = .{ .@"and" = .{ .left = .{ .tag = "A" }, .right = .{ .tag = "B" } } };
 
         const actual = try p.parseAlloc();
         defer t.allocator.free(actual);
@@ -174,6 +177,13 @@ test "Bad queries" {
     }
     {
         var l = lexer.Lexer.init("and and");
+        var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
+        defer p.deinit();
+
+        try t.expectError(error.IllegalFormat, p.parseAlloc());
+    }
+    {
+        var l = lexer.Lexer.init("&A and &B");
         var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
         defer p.deinit();
 
