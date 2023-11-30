@@ -107,7 +107,15 @@ pub const Todo = struct {
 
         // Make sure that regardless of having a tag or not, a group or not, that the description
         // doesn't contain any of them.
-        var end_of_description_index = @min(line.len, @min(first_tag_index, group_index));
+        var end_of_description_index = blk: {
+            if ((line.len == first_tag_index) and (line.len == group_index))
+                break :blk line.len;
+            break :blk @min(first_tag_index - 1, group_index - 1);
+        };
+
+        // TODO: this could be handled more elegantly..
+        if (first_tag_index != line.len and group_index != line.len and first_tag_index > group_index)
+            return error.IncorrectFormat;
 
         if (group_index != line.len) {
             const maybe_second_group = std.mem.lastIndexOfScalar(u8, line[group_index + 1 ..], '&');
@@ -118,12 +126,10 @@ pub const Todo = struct {
             group = line[group_index + 1];
         }
 
-        if (first_tag_index != line.len) {
+        if (first_tag_index != line.len)
             _ = try generateTags(line, first_tag_index, group_index, &tags);
-        }
 
-        // -1 because of the preceding space.
-        const description = line[0 .. end_of_description_index - 1];
+        const description = line[0..end_of_description_index];
         const hash = try generateTodoHash(description);
 
         return .{
@@ -201,7 +207,7 @@ test "Can't make an empty Todo" {
 }
 
 test "Can't have multiple groups in a Todo" {
-    try t.expectError(Errors.FoundMultipleGroups, Todo.fromLine("&A &B", t.allocator));
+    try t.expectError(Errors.FoundMultipleGroups, Todo.fromLine("Hi mom! &A &B", t.allocator));
 }
 
 test "Single Group Todo" {
@@ -209,14 +215,14 @@ test "Single Group Todo" {
     defer td.deinit();
 
     try t.expectEqualStrings("Hello World!", td.description);
-    // try t.expectEqual(td.group, 'A');
+    try t.expectEqual(td.group, 'A');
 }
 
 test "Make a Todo" {
     var td = try Todo.fromLine("Hello World! +Newbie &A", t.allocator);
     defer td.deinit();
 
-    try t.expectEqualSlices(u8, "Hello World!", td.description);
+    try t.expectEqualStrings("Hello World!", td.description);
     try t.expect(td.group == 'A');
     const expected_tags = &[_][]const u8{"Newbie"};
 
@@ -295,4 +301,8 @@ test "More complex query" {
 test "Generating a hash" {
     const actual = try generateTodoHash("Hi mom!");
     try t.expectEqualStrings("ea7e8167ce8b6ad93d43ac5aa869a920", &actual);
+}
+
+test "Trying to write a bad todo." {
+    try t.expectError(error.IncorrectFormat, Todo.fromLine("Hello World! &A +Newbie", t.allocator));
 }

@@ -42,6 +42,9 @@ pub fn main() !void {
             error.MissingArgument => {
                 try stdout.print("This command needs more context!\n", .{});
             },
+            error.IncorrectFormat => {
+                try stdout.print("Your todo doesn't follow the right format!\n", .{});
+            },
             else => {
                 @panic("Unknown error!");
             },
