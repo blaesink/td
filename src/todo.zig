@@ -17,12 +17,13 @@ fn generateTodoHash(todo_description: []const u8) ![32]u8 {
 
     md5.hash(todo_description, &hash_buf, .{});
 
-    _ = try std.fmt.bufPrint(&output, "{s}", .{std.fmt.fmtSliceHexLower(&hash_buf)});
+    _ = try std.fmt.bufPrint(&output, "{x}", .{std.fmt.fmtSliceHexLower(&hash_buf)});
 
     return output;
 }
 
 /// Split a string between `start_index` and `end_index` and add its contents to `tags`.
+/// Returns the number of generated tags.
 fn generateTags(
     line: []const u8,
     start_index: usize,
@@ -31,14 +32,14 @@ fn generateTags(
 ) !usize {
     var tag_tokens = std.mem.tokenizeScalar(u8, line[start_index..stop_index], ' ');
 
-    var written_tags: usize = 0;
+    var num_written_tags: usize = 0;
 
     while (tag_tokens.next()) |tag| {
         try tags.append(tag[1..]);
-        written_tags += 1;
+        num_written_tags += 1;
     }
 
-    return written_tags;
+    return num_written_tags;
 }
 
 /// A `Todo` holds its `description`, `tags` and `group`.
@@ -61,14 +62,11 @@ pub const Todo = struct {
 
     /// For use in creating a todo when it's already written into a todo file.
     pub fn fromFormattedLine(line: []const u8, allocator: std.mem.Allocator) !Self {
-        if (line.len == 0) {
+        if (line.len == 0)
             return Errors.EmptyLineError;
-        }
 
         const group: u8 = line[0];
-
-        var description = ArrayList(u8).init(allocator);
-
+        var description: []const u8 = undefined;
         var tags = ArrayList([]const u8).init(allocator);
 
         const first_tag_index = std.mem.indexOfScalar(u8, line, '+') orelse line.len;
@@ -76,22 +74,20 @@ pub const Todo = struct {
         const hash_start_index = std.mem.lastIndexOfScalar(u8, line, '(');
         const hash_end_index = std.mem.lastIndexOfScalar(u8, line, ')');
 
-        if (hash_start_index == null or hash_end_index == null) {
+        if (hash_start_index == null or hash_end_index == null)
             return error.InvalidFormat;
-        }
 
         const hash = line[hash_start_index.? + 1 .. hash_end_index.?];
 
         if (first_tag_index < line.len) {
-            // - 1 because we need to ignore previous whitespace.
-            try description.appendSlice(line[description_start_index .. first_tag_index - 1]);
+            description = line[description_start_index .. first_tag_index - 1];
             _ = try generateTags(line, first_tag_index, line.len, &tags);
         } else {
-            try description.appendSlice(line[description_start_index .. hash_start_index.? - 1]);
+            description = line[description_start_index .. hash_start_index.? - 1];
         }
 
         return .{
-            .description = try description.toOwnedSlice(),
+            .description = description,
             .group = group,
             .tags = tags,
             .allocator = allocator,
@@ -100,12 +96,8 @@ pub const Todo = struct {
     }
 
     pub fn fromLine(line: []const u8, allocator: std.mem.Allocator) !Self {
-        if (line.len == 0) {
+        if (line.len == 0)
             return Errors.EmptyLineError;
-        }
-
-        var description = ArrayList(u8).init(allocator);
-        defer description.deinit();
 
         var group: u8 = '-';
         var tags = ArrayList([]const u8).init(allocator);
@@ -120,9 +112,9 @@ pub const Todo = struct {
         if (group_index != line.len) {
             const maybe_second_group = std.mem.lastIndexOfScalar(u8, line[group_index + 1 ..], '&');
 
-            if (maybe_second_group != null) {
+            if (maybe_second_group != null)
                 return Errors.FoundMultipleGroups;
-            }
+
             group = line[group_index + 1];
         }
 
@@ -130,21 +122,12 @@ pub const Todo = struct {
             _ = try generateTags(line, first_tag_index, group_index, &tags);
         }
 
-        var words = std.mem.tokenizeScalar(u8, line[0..end_of_description_index], ' ');
-
-        while (words.next()) |word| {
-            try description.appendSlice(word);
-
-            // TODO: this probably isn't the best way to check this.
-            if (words.peek() != null) {
-                try description.append(' ');
-            }
-        }
-
-        const hash = try generateTodoHash(description.items);
+        // -1 because of the preceding space.
+        const description = line[0 .. end_of_description_index - 1];
+        const hash = try generateTodoHash(description);
 
         return .{
-            .description = try description.toOwnedSlice(),
+            .description = description,
             .group = group,
             .tags = tags,
             .allocator = allocator,
@@ -182,7 +165,7 @@ pub const Todo = struct {
     }
 
     pub fn deinit(self: Self) void {
-        self.allocator.free(self.description);
+        // self.allocator.free(self.description);
         self.tags.deinit();
     }
 
@@ -240,6 +223,13 @@ test "Make a Todo" {
     for (expected_tags, td.tags.items) |expected, actual| {
         try t.expectEqualSlices(u8, expected, actual);
     }
+}
+
+test "Checking a generated todo hash" {
+    var td = try Todo.fromLine("Hi mom! +A", t.allocator);
+    defer td.deinit();
+
+    try t.expectEqualStrings("ea7e8167ce8b6ad93d43ac5aa869a920", td.hash);
 }
 
 test "Check formatting" {

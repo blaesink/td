@@ -202,7 +202,8 @@ pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.A
         return error.UnknownCommand;
     };
 
-    if (cmd_to_enum != .ls and input == null) return error.MissingArgument;
+    if (cmd_to_enum != .ls and input == null)
+        return error.MissingArgument;
 
     switch (cmd_to_enum) {
         .add => {
