@@ -3,7 +3,7 @@ const t = std.testing;
 const expect = std.testing.expect;
 
 pub const Token = union(enum) {
-    group: []const u8,
+    group: u8,
     tag: []const u8,
     ident: []const u8,
 
@@ -84,7 +84,7 @@ pub const Lexer = struct {
                         const word = self.readWord();
 
                         if (char == '&')
-                            return .{ .group = word };
+                            return .{ .group = word[0] };
 
                         return .{ .tag = word };
                     },
@@ -201,7 +201,7 @@ test "Collect one word" {
     const tokens = try l.collectAlloc(t.allocator);
     defer t.allocator.free(tokens);
     const expected = [_]Token{
-        .{ .group = "A" },
+        .{ .group = 'A' },
         .eof,
     };
 
@@ -216,9 +216,9 @@ test "Collecting a new lexer into a slice" {
     defer t.allocator.free(actual);
 
     const expected = [_]Token{
-        .{ .group = "A" },
+        .{ .group = 'A' },
         .@"or",
-        .{ .group = "B" },
+        .{ .group = 'B' },
         .eof,
     };
 

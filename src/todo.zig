@@ -60,6 +60,15 @@ pub const Todo = struct {
     allocator: std.mem.Allocator,
     hash: []const u8,
 
+    pub fn format(
+        self: Self,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) std.os.WriteError!void {
+        return writer.print("<Todo: &{c} {s}>", .{ self.group, self.description });
+    }
+
     /// For use in creating a todo when it's already written into a todo file.
     pub fn fromFormattedLine(line: []const u8, allocator: std.mem.Allocator) !Self {
         if (line.len == 0)
@@ -201,6 +210,18 @@ pub const Todo = struct {
         return contents_to_write.toOwnedSlice();
     }
 };
+
+pub fn containsTag(td: Todo, tag: []const u8) bool {
+    const result = blk: {
+        for (td.tags.items) |todo_tag| {
+            if (std.mem.eql(u8, todo_tag, tag))
+                break :blk true;
+        }
+        break :blk false;
+    };
+
+    return result;
+}
 
 test "Can't make an empty Todo" {
     try t.expectError(Errors.EmptyLineError, Todo.fromLine("", t.allocator));

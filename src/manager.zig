@@ -1,10 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const lib_todo = @import("todo.zig");
+const parser = @import("parser.zig");
+
 const fs = std.fs;
 const t = std.testing;
 const Todo = lib_todo.Todo;
 const ArrayList = std.ArrayList;
+const Parser = parser.Parser;
 
 const TD_HOME_DIR: []const u8 = ".td";
 
@@ -67,7 +70,8 @@ fn readFileContentsToLinesAlloc(file_contents: []const u8, allocator: std.mem.Al
     var lines_iterator = std.mem.splitScalar(u8, file_contents, '\n');
 
     while (lines_iterator.next()) |line| {
-        try result_lines.append(line);
+        if (line.len > 0)
+            try result_lines.append(line);
     }
 
     return result_lines.toOwnedSlice();
@@ -146,33 +150,58 @@ fn generateTodoFile(home_path: []const u8) !void {
 /// Filter through the todos and return those that match.
 /// +<tag> checks to see if the tag is the same.
 /// &<group> checks to see if the group is the same.
-fn queryAndFilterTodosAlloc(todo_lines: [][]const u8, query: []const u8, allocator: std.mem.Allocator) ![]const u8 {
-    var parsed_query = try Todo.fromLineNoDescription(query, allocator);
-    defer parsed_query.deinit();
+fn queryAndFilterTodosAlloc(todo_lines: [][]const u8, query: []const u8, allocator: std.mem.Allocator) ![][]const u8 {
+    var criteria = try Parser.lexAndParseLineAlloc(query, allocator);
+    defer allocator.free(criteria);
 
-    var matches: ArrayList(u8) = ArrayList(u8).init(allocator);
-    const match_writer = matches.writer();
+    var matches: ArrayList([]const u8) = ArrayList([]const u8).init(allocator);
 
-    for (todo_lines[0 .. todo_lines.len - 1]) |line| {
-        if (parsed_query.group != '-' and line[0] == parsed_query.group) {
-            try std.fmt.format(match_writer, "{s}\n", .{line});
-            continue;
-        }
-
+    for (todo_lines) |line| {
         const todo = try Todo.fromFormattedLine(line, allocator);
         defer todo.deinit();
 
-        if (parsed_query.tags.items.len > 0 and todo.tags.items.len > 0) {
-            for (parsed_query.tags.items) |tag| {
-                for (todo.tags.items) |todo_tag| {
-                    if (std.mem.eql(u8, tag, todo_tag)) {
-                        try std.fmt.format(match_writer, "{s}\n", .{line});
+        var is_match = false;
+
+        for (criteria) |criterion| {
+            switch (criterion) {
+                .Literal => |lit| is_match = std.mem.containsAtLeast(u8, todo.description, 1, lit),
+                .Group => |grp| is_match = todo.group == grp,
+                .Tag => |tag| is_match = lib_todo.containsTag(todo, tag),
+                .@"and" => |a| is_match = blk: {
+                    // Can never be two groups!
+                    for (a.ops) |op| {
+                        if (op == .tag) {
+                            if (!lib_todo.containsTag(todo, op.tag))
+                                break :blk false;
+                        } else if (op == .group) {
+                            if (todo.group != op.group)
+                                break :blk false;
+                        }
                     }
-                }
+                    break :blk true;
+                },
+                .@"or" => |o| is_match = blk: {
+                    for (o.ops) |op| {
+                        if (op == .tag and lib_todo.containsTag(todo, op.tag))
+                            break :blk true;
+                        if (op == .group and todo.group == op.group)
+                            break :blk true;
+                    }
+                    break :blk false;
+                },
+                .not => |n| is_match = blk: {
+                    switch (n.right) {
+                        .group => |grp| break :blk todo.group != grp,
+                        .tag => |tag| break :blk !lib_todo.containsTag(todo, tag),
+                        else => unreachable,
+                    }
+                },
             }
         }
-    }
 
+        if (is_match)
+            try matches.append(line);
+    }
     return try matches.toOwnedSlice();
 }
 
@@ -211,7 +240,8 @@ pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.A
             var td = try Todo.fromLine(input.?[0..input.?.len], allocator);
             defer td.deinit();
             const id = try addTodo(todo_file, td, allocator);
-            std.debug.print("{s}\n", .{id});
+            try std.io.getStdOut().writer().print("{s}\n", .{id});
+            // std.debug.print("{s}\n", .{id});
         },
         .remove, .rm => {
             const maybe_todo_hash = try getTodoFromHash(todo_file, input.?, allocator);
@@ -233,7 +263,9 @@ pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.A
                 const matching_todos = try queryAndFilterTodosAlloc(lines, text, allocator);
                 defer allocator.free(matching_todos);
 
-                try stdout.print("{s}", .{matching_todos});
+                for (matching_todos) |todo| {
+                    try stdout.print("{s}\n", .{todo});
+                }
             } else {
                 try stdout.print("{s}", .{file_contents});
             }
@@ -309,8 +341,20 @@ pub const TestQueries = struct {
         const result = try queryAndFilterTodosAlloc(lines, query, t.allocator);
         defer t.allocator.free(result);
 
-        try t.expect(result.len > 0);
+        try t.expectEqual(@as(usize, 1), result.len);
+    }
 
-        try t.expectEqualStrings(fake_todos, result);
+    test "Exclusionary queries" {
+        {
+            const fake_todos = "B All your todo are belong to us. (abc123)\n";
+
+            const lines = try readFileContentsToLinesAlloc(fake_todos, t.allocator);
+            defer t.allocator.free(lines);
+
+            const result = try queryAndFilterTodosAlloc(lines, "not &B", t.allocator);
+            defer t.allocator.free(result);
+
+            try t.expectEqual(@as(usize, 0), result.len);
+        }
     }
 };

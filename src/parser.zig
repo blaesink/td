@@ -1,16 +1,16 @@
 const std = @import("std");
 const t = std.testing;
 const lexer = @import("lexer.zig");
+
+const Lexer = lexer.Lexer;
 const Token = lexer.Token;
 
 const And = struct {
-    left: Token,
-    right: Token,
+    ops: [2]Token,
 };
 
 const Or = struct {
-    left: Token,
-    right: Token,
+    ops: [2]Token,
 };
 
 const Not = struct {
@@ -21,6 +21,11 @@ const Node = union(enum) {
     @"and": And,
     @"or": Or,
     not: Not,
+
+    // For exact matches.
+    Group: u8,
+    Tag: []const u8,
+    Literal: []const u8,
 };
 
 /// Rules
@@ -29,7 +34,7 @@ const Node = union(enum) {
 /// VP -> V I
 /// VP -> I V I
 /// VP -> V
-const Parser = struct {
+pub const Parser = struct {
     const Self = @This();
 
     tokens: []Token,
@@ -93,15 +98,24 @@ const Parser = struct {
 
                         if (rhs == .tag or rhs == .group) {
                             if (maybe_operator_token == .@"and")
-                                break :blk Node{ .@"and" = .{ .left = lhs, .right = rhs } };
-                            break :blk Node{ .@"or" = .{ .left = lhs, .right = rhs } };
+                                break :blk Node{ .@"and" = .{ .ops = [2]Token{ lhs, rhs } } };
+                            break :blk Node{ .@"or" = .{ .ops = [2]Token{ lhs, rhs } } };
+                        }
+                    } else {
+                        switch (lhs) {
+                            .tag => |tag| break :blk Node{ .Tag = tag },
+                            .group => |grp| break :blk Node{ .Group = grp },
+                            else => return error.IllegalFormat,
                         }
                     }
                 },
                 .not => blk: {
                     const rhs = self.peekToken();
                     switch (rhs) {
-                        .tag, .group => break :blk Node{ .not = .{ .right = rhs } },
+                        .tag, .group => {
+                            self.advanceToken();
+                            break :blk Node{ .not = .{ .right = rhs } };
+                        },
                         else => return error.IllegalFormat,
                     }
                 },
@@ -112,6 +126,17 @@ const Parser = struct {
         }
 
         return nodes.toOwnedSlice();
+    }
+
+    /// Lex and parse a line, returning an allocated slice of nodes.
+    pub fn lexAndParseLineAlloc(input: []const u8, allocator: std.mem.Allocator) ![]Node {
+        var lex = Lexer.init(input);
+        const tokens = try lex.collectAlloc(allocator);
+
+        var p = Parser.init(tokens, allocator);
+        defer p.deinit();
+
+        return try p.parseAlloc();
     }
 };
 
@@ -146,7 +171,7 @@ test "Parse a simple query" {
         var p = Parser.init(try l.collectAlloc(t.allocator), t.allocator);
         defer p.deinit();
 
-        const expected = .{ .@"and" = .{ .left = .{ .tag = "A" }, .right = .{ .tag = "B" } } };
+        const expected = .{ .@"and" = .{ .ops = [2]Token{ .{ .tag = "A" }, .{ .tag = "B" } } } };
 
         const actual = try p.parseAlloc();
         defer t.allocator.free(actual);
@@ -158,7 +183,7 @@ test "Parse a simple query" {
         defer p.deinit();
 
         const expected = [_]Node{
-            .{ .@"or" = .{ .left = .{ .group = "A" }, .right = .{ .group = "B" } } },
+            .{ .@"or" = .{ .ops = [2]Token{ .{ .group = 'A' }, .{ .group = 'B' } } } },
         };
 
         const actual = try p.parseAlloc();
@@ -189,4 +214,25 @@ test "Bad queries" {
 
         try t.expectError(error.IllegalFormat, p.parseAlloc());
     }
+}
+
+test "Lex and parse in one pass" {
+    const input = "+A and +B";
+
+    const nodes = try Parser.lexAndParseLineAlloc(input, t.allocator);
+    defer t.allocator.free(nodes);
+
+    const expected = .{ .@"and" = .{ .left = .{ .tag = "A" }, .right = .{ .tag = "B" } } };
+
+    try t.expectEqualDeep(expected, nodes[0]);
+}
+
+// Because it's being annoying.
+test "Not stuff" {
+    const nodes = try Parser.lexAndParseLineAlloc("not &B", t.allocator);
+    defer t.allocator.free(nodes);
+
+    const expected = Node{ .not = .{ .right = .{ .group = 'B' } } };
+
+    try t.expectEqualDeep(expected, nodes[0]);
 }
