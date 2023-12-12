@@ -225,47 +225,6 @@ pub const StaticTodo = struct {
     }
 };
 
-pub const TodoQuery = struct {
-    inner: TodoInner,
-    allocator: std.mem.Allocator,
-
-    const Self = @This();
-
-    pub fn init(line: []const u8, allocator: std.mem.Allocator) !Self {
-        const first_tag_index: ?usize = std.mem.indexOfScalar(u8, line, '+') orelse null;
-        const group_index: ?usize = std.mem.indexOfScalar(u8, line, '&') orelse null;
-
-        var tags = ArrayList([]const u8).init(allocator);
-
-        var group: u8 = '-';
-
-        if (group_index != null) {
-            group = line[group_index.? + 1];
-        }
-
-        if (first_tag_index) |ti| {
-            if (group_index) |gi| {
-                _ = try generateTags(line, ti, gi, &tags);
-            } else {
-                _ = try generateTags(line, ti, line.len, &tags);
-            }
-        }
-
-        return .{
-            .inner = .{
-                .description = "", // Don't care but too lazy to make optional.
-                .group = group,
-                .tags = try tags.toOwnedSlice(),
-            },
-            .allocator = allocator,
-        };
-    }
-
-    pub fn deinit(self: Self) void {
-        self.allocator.free(self.inner.tags);
-    }
-};
-
 test "Can't make an empty Todo" {
     try t.expectError(Errors.EmptyLineError, Todo.init("", t.allocator));
 }
@@ -310,21 +269,6 @@ test "Check formatting" {
     try t.expectEqualStrings(expected_format, actual_format);
 }
 
-test "Make a todo with No Description (for Querying)" {
-    var td = try TodoQuery.init("+A &B", t.allocator);
-    defer td.deinit();
-
-    t.expect(td.inner.group == 'B') catch {
-        std.log.err("Expected 'B', got {c}", .{td.inner.group});
-    };
-
-    const expected_tags = &[_][]const u8{"A"};
-
-    for (expected_tags, td.inner.tags) |expected, actual| {
-        try t.expectEqualStrings(expected, actual);
-    }
-}
-
 test "Reconstruct from a formatted line" {
     const line = "B All your todo are belong to us. +1337 (abc123)";
 
@@ -334,25 +278,6 @@ test "Reconstruct from a formatted line" {
     try t.expect(todo.inner.group == 'B');
     try t.expectEqualStrings("All your todo are belong to us.", todo.inner.description);
     try t.expectEqualStrings("abc123", todo.hash);
-}
-
-test "Make a simple query" {
-    const query = try TodoQuery.init("&B", t.allocator);
-    defer query.deinit();
-
-    try t.expect(query.inner.group == 'B');
-}
-
-test "More complex query" {
-    const query = try TodoQuery.init("+A +C &B", t.allocator);
-    defer query.deinit();
-
-    try t.expect(query.inner.group == 'B');
-    const expected_tags = [_][]const u8{ "A", "C" };
-
-    for (expected_tags, query.inner.tags) |expected, actual| {
-        try t.expectEqualStrings(expected, actual);
-    }
 }
 
 test "Generating a hash" {
