@@ -80,16 +80,8 @@ fn readFileContentsToLinesAlloc(file_contents: []const u8, allocator: std.mem.Al
 // FIXME: this keeps the last line! Can we fix that or do we need to check it at runtime?
 fn splitLines(file_contents: []const u8) std.mem.SplitIterator(u8, .scalar) {
     if (builtin.os.tag == .windows) {
-        return splitLinesWindows(file_contents);
+        return std.mem.splitSequence(u8, file_contents, "\r\n");
     }
-    return splitLinesPosix(file_contents);
-}
-
-fn splitLinesWindows(file_contents: []const u8) std.mem.SplitIterator(u8, .scalar) {
-    return std.mem.splitSequence(u8, file_contents, "\r\n");
-}
-
-fn splitLinesPosix(file_contents: []const u8) std.mem.SplitIterator(u8, .scalar) {
     return std.mem.splitScalar(u8, file_contents, '\n');
 }
 
@@ -210,14 +202,13 @@ pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.A
 
     const user_home_string = try getHomeDirAbsolute();
     const config_file_string = try fs.path.join(allocator, &[_][]const u8{ user_home_string, ".config", "td", "config.txt" });
-    defer allocator.free(config_file_string);
 
     // TODO: this is just to check that we have a config file by the time we want to use it.
     fs.accessAbsolute(config_file_string, .{}) catch {
         try maybeGenerateConfigFile(allocator);
     };
 
-    // Could free `config_file_string` right here.
+    allocator.free(config_file_string);
 
     const todo_file_path = try fs.path.join(allocator, &[_][]const u8{ user_home_string, TD_HOME_DIR, "todo.txt" });
     defer allocator.free(todo_file_path);

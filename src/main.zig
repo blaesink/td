@@ -10,8 +10,6 @@ pub fn main() !void {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-    // var input_buffer: [1024]u8 = undefined;
-    // _ = input_buffer;
 
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
