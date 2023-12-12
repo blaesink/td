@@ -6,6 +6,7 @@ const parser = @import("parser.zig");
 const fs = std.fs;
 const t = std.testing;
 const Todo = lib_todo.Todo;
+const StaticTodo = lib_todo.StaticTodo;
 const ArrayList = std.ArrayList;
 const Parser = parser.Parser;
 
@@ -48,9 +49,10 @@ fn removeTodo(todo_file: fs.File, todo_hash: []const u8, allocator: std.mem.Allo
     _ = try todo_file.write(lines_to_write.items);
 }
 
-fn addTodo(todo_file: fs.File, todo: Todo, allocator: std.mem.Allocator) ![]const u8 {
+fn addTodo(todo_file: fs.File, todo: Todo, allocator: std.mem.Allocator) !void {
     // TODO: check that we already have this file generated.
-    if (try getTodoFromHash(todo_file, todo.hash, allocator) != null) return error.ExistingHashFound;
+    if (try getTodoFromHash(todo_file, todo.hash, allocator) != null)
+        return error.ExistingHashFound;
 
     // Go to the end of the file to start appending to.
     try todo_file.seekTo(try todo_file.getEndPos());
@@ -60,8 +62,6 @@ fn addTodo(todo_file: fs.File, todo: Todo, allocator: std.mem.Allocator) ![]cons
 
     // Write to the file
     _ = try todo_file.write(formatted_todo);
-
-    return todo.hash;
 }
 
 fn readFileContentsToLinesAlloc(file_contents: []const u8, allocator: std.mem.Allocator) ![][]const u8 {
@@ -157,15 +157,15 @@ fn queryAndFilterTodosAlloc(todo_lines: [][]const u8, query: []const u8, allocat
     var matches: ArrayList([]const u8) = ArrayList([]const u8).init(allocator);
 
     for (todo_lines) |line| {
-        const todo = try Todo.fromFormattedLine(line, allocator);
+        const todo = try StaticTodo.init(line, allocator);
         defer todo.deinit();
 
         var is_match = false;
 
         for (criteria) |criterion| {
             switch (criterion) {
-                .Literal => |lit| is_match = std.mem.containsAtLeast(u8, todo.description, 1, lit),
-                .Group => |grp| is_match = todo.group == grp,
+                .Literal => |lit| is_match = std.mem.containsAtLeast(u8, todo.inner.description, 1, lit),
+                .Group => |grp| is_match = todo.inner.group == grp,
                 .Tag => |tag| is_match = lib_todo.containsTag(todo, tag),
                 .@"and" => |a| is_match = blk: {
                     // Can never be two groups!
@@ -174,7 +174,7 @@ fn queryAndFilterTodosAlloc(todo_lines: [][]const u8, query: []const u8, allocat
                             if (!lib_todo.containsTag(todo, op.tag))
                                 break :blk false;
                         } else if (op == .group) {
-                            if (todo.group != op.group)
+                            if (todo.inner.group != op.group)
                                 break :blk false;
                         }
                     }
@@ -184,14 +184,14 @@ fn queryAndFilterTodosAlloc(todo_lines: [][]const u8, query: []const u8, allocat
                     for (o.ops) |op| {
                         if (op == .tag and lib_todo.containsTag(todo, op.tag))
                             break :blk true;
-                        if (op == .group and todo.group == op.group)
+                        if (op == .group and todo.inner.group == op.group)
                             break :blk true;
                     }
                     break :blk false;
                 },
                 .not => |n| is_match = blk: {
                     switch (n.right) {
-                        .group => |grp| break :blk todo.group != grp,
+                        .group => |grp| break :blk todo.inner.group != grp,
                         .tag => |tag| break :blk !lib_todo.containsTag(todo, tag),
                         else => unreachable,
                     }
@@ -234,14 +234,14 @@ pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.A
     if (cmd_to_enum != .ls and input == null)
         return error.MissingArgument;
 
+    // TODO: just assign this to a const w/ a block.
     switch (cmd_to_enum) {
         .add => {
             // Remove surrounding quotation marks.
-            var td = try Todo.fromLine(input.?[0..input.?.len], allocator);
+            var td = try Todo.init(input.?[0..input.?.len], allocator);
             defer td.deinit();
-            const id = try addTodo(todo_file, td, allocator);
-            try std.io.getStdOut().writer().print("{s}\n", .{id});
-            // std.debug.print("{s}\n", .{id});
+            try addTodo(todo_file, td, allocator);
+            try std.io.getStdOut().writer().print("{s}\n", .{td.hash});
         },
         .remove, .rm => {
             const maybe_todo_hash = try getTodoFromHash(todo_file, input.?, allocator);
@@ -297,13 +297,10 @@ pub const TestingTodo = struct {
         const todo_file = try std.fs.cwd().openFile("todo.txt", .{ .mode = .read_write });
         defer todo_file.close();
 
-        var td = try Todo.fromLine("Hello World!", t.allocator);
+        var td = try Todo.init("Hello World!", t.allocator);
         defer td.deinit();
 
-        const added_todo_id = try addTodo(todo_file, td, t.allocator);
-
-        try std.testing.expect(added_todo_id.len > 0);
-
+        try addTodo(todo_file, td, t.allocator);
         try Self.remove_test_file();
     }
 
@@ -313,11 +310,11 @@ pub const TestingTodo = struct {
         const todo_file = try std.fs.cwd().openFile("todo.txt", .{ .mode = .read_write });
         defer todo_file.close();
 
-        var td = try Todo.fromLine("Hello World!", t.allocator);
+        var td = try Todo.init("Hello World!", t.allocator);
         defer td.deinit();
 
-        const added_todo_id = try addTodo(todo_file, td, t.allocator);
-        _ = try removeTodo(todo_file, added_todo_id, t.allocator);
+        try addTodo(todo_file, td, t.allocator);
+        _ = try removeTodo(todo_file, td.hash, t.allocator);
 
         const file_contents = try todo_file.readToEndAlloc(t.allocator, 4096);
         defer t.allocator.free(file_contents);
