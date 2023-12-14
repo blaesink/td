@@ -25,7 +25,8 @@ fn generateTodoHashAlloc(todo_description: []const u8, allocator: std.mem.Alloca
 }
 
 /// Split a string between `start_index` and `end_index` and add its contents to `tags`.
-/// Returns the number of generated tags.
+/// # Returns:
+/// The number of generated tags.
 fn generateTags(
     line: []const u8,
     start_index: usize,
@@ -37,6 +38,7 @@ fn generateTags(
     var num_written_tags: usize = 0;
 
     while (tag_tokens.next()) |tag| {
+        // Skip the + or #.
         try tags.append(tag[1..]);
         num_written_tags += 1;
     }
@@ -88,22 +90,21 @@ pub const Todo = struct {
         var group: u8 = '-';
         var tags = ArrayList([]const u8).init(allocator);
 
-        const first_tag_index = std.mem.indexOfScalar(u8, line, '+') orelse line.len;
+        const first_tag_index = blk: {
+            const maybe_pound_index = std.mem.indexOfScalar(u8, line, '#') orelse line.len;
+            const maybe_plus_index = std.mem.indexOfScalar(u8, line, '+') orelse line.len;
+
+            break :blk @min(maybe_pound_index, maybe_plus_index);
+        };
         const group_index = std.mem.indexOfScalar(u8, line, '&') orelse line.len;
 
-        // Make sure that regardless of having a tag or not, a group or not, that the description
-        // doesn't contain any of them.
-        var end_of_description_index = blk: {
-            if ((line.len == first_tag_index) and (line.len == group_index))
-                break :blk line.len;
-            break :blk @min(first_tag_index - 1, group_index - 1);
-        };
+        const end_of_description_index = @min(line.len, @min(first_tag_index - 1, group_index - 1));
 
         // TODO: this could be handled more elegantly..
         if (first_tag_index != line.len and group_index != line.len and first_tag_index > group_index)
             return error.IncorrectFormat;
 
-        if (group_index != line.len) {
+        if (group_index < line.len) {
             const maybe_second_group = std.mem.lastIndexOfScalar(u8, line[group_index + 1 ..], '&');
 
             if (maybe_second_group != null)
@@ -134,7 +135,7 @@ pub const Todo = struct {
         self.allocator.free(self.hash);
     }
 
-    /// Return a nicely formatted string of this object (how it was written).
+    /// Return a nicely formatted string of this object (how it is represented).
     pub fn formatToStringAlloc(self: Self) ![]const u8 {
         var contents_to_write = ArrayList(u8).init(self.allocator);
 
@@ -152,9 +153,18 @@ pub const Todo = struct {
             // Remove the last space from the string because I'm too lazy to do a conditional above.
             _ = tag_string.pop();
 
-            try std.fmt.format(writer, "{c} {s} {s} ({s})\n", .{ self.inner.group, self.inner.description, tag_string.items, self.hash });
+            try std.fmt.format(writer, "{c} {s} {s} ({s})\n", .{
+                self.inner.group,
+                self.inner.description,
+                tag_string.items,
+                self.hash,
+            });
         } else {
-            try std.fmt.format(writer, "{c} {s} ({s})\n", .{ self.inner.group, self.inner.description, self.hash });
+            try std.fmt.format(writer, "{c} {s} ({s})\n", .{
+                self.inner.group,
+                self.inner.description,
+                self.hash,
+            });
         }
         return contents_to_write.toOwnedSlice();
     }
@@ -256,12 +266,18 @@ test "Make a Todo" {
 }
 
 test "Check formatting" {
-    const line = "Hi mom! +Newbie &A";
+    const line = "Hi mom! #Newbie +Tag &A";
 
     var td = try Todo.init(line, t.allocator);
     defer td.deinit();
 
-    const expected_format = "A Hi mom! +Newbie (ea7e8167ce8b6ad93d43ac5aa869a920)\n";
+    const expected_tags = [_][]const u8{ "Newbie", "Tag" };
+
+    for (expected_tags, td.inner.tags) |e, a| {
+        try t.expectEqualStrings(e, a);
+    }
+
+    const expected_format = "A Hi mom! +Newbie +Tag (ea7e8167ce8b6ad93d43ac5aa869a920)\n";
 
     const actual_format = try td.formatToStringAlloc();
     defer t.allocator.free(actual_format);
@@ -278,6 +294,20 @@ test "Reconstruct from a formatted line" {
     try t.expect(todo.inner.group == 'B');
     try t.expectEqualStrings("All your todo are belong to us.", todo.inner.description);
     try t.expectEqualStrings("abc123", todo.hash);
+}
+
+test "Mix of # and + in tags" {
+    const input = "Hi mom! #A +B";
+    var taglist = ArrayList([]const u8).init(t.allocator);
+    defer taglist.deinit();
+
+    const expected = [_][]const u8{ "A", "B" };
+
+    _ = try generateTags(input, 8, input.len, &taglist);
+
+    for (expected, taglist.items) |e, a| {
+        try t.expectEqualStrings(e, a);
+    }
 }
 
 test "Generating a hash" {

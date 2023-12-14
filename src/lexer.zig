@@ -76,7 +76,7 @@ pub const Lexer = struct {
         self.skipWhitespace();
 
         const token: Token = switch (self.current_char) {
-            '&', '+' => {
+            '&', '#', '+' => {
                 const char = self.current_char;
                 switch (self.peek()) {
                     'a'...'z', 'A'...'Z' => {
