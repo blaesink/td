@@ -14,11 +14,18 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
+    var command: [:0]const u8 = undefined;
+
     // Skip the first arg (path of the executable).
     _ = args.skip();
 
-    // There must be a command.
-    const command = args.next().?;
+    if (args.next()) |a| {
+        command = a;
+    } else {
+        // There must be a command.
+        try stdout.print("You need to supply a command!\n", .{});
+        return;
+    }
 
     // The rest is optional depending on the command.
     const todo_input = args.next();
