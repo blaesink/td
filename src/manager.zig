@@ -222,8 +222,12 @@ pub fn evalCommand(command: []const u8, input: ?[]const u8, allocator: std.mem.A
         return error.UnknownCommand;
     };
 
-    if (cmd_to_enum != .ls and input == null)
-        return error.MissingArgument;
+    switch (cmd_to_enum) {
+        .ls, .help => {}, // help and ls don't need args.
+        else => { // But everything else does.
+            if (input == null) return error.MissingArgument;
+        },
+    }
 
     // TODO: just assign this to a const w/ a block.
     switch (cmd_to_enum) {
